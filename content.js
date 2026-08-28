@@ -14,9 +14,19 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         key === BingAssistant.KEYS.limitSearchCount ||
         key === BingAssistant.KEYS.lastKeyword ||
         key === BingAssistant.KEYS.productState ||
+        key === BingAssistant.KEYS.taskList ||
+        key === BingAssistant.KEYS.dailyKeywordPlan ||
+        key === BingAssistant.KEYS.blockedKeywords ||
+        key === BingAssistant.KEYS.selectedChannel ||
+        key === BingAssistant.KEYS.keywordShuffle ||
         key.indexOf("Rebang_AutoSearchCount_") === 0
     );
+    if (changes[BingAssistant.KEYS.dailyKeywordPlan] || changes[BingAssistant.KEYS.blockedKeywords] || changes[BingAssistant.KEYS.selectedChannel] || changes[BingAssistant.KEYS.keywordShuffle]) {
+        try { sessionStorage.removeItem(getCurrentChannelKeywordsCacheKey()); } catch (error) {}
+        if (typeof initKeywords === "function" && $("#ext-keywords-list").length) initKeywords();
+    }
     if (shouldRefreshBar && typeof updateMiniBar === "function") updateMiniBar();
+    if (changes[BingAssistant.KEYS.taskList] && typeof renderTaskListFromStore === "function") renderTaskListFromStore();
 });
 
 function GM_getValue(key, defaultValue) {
@@ -237,6 +247,11 @@ GM_addStyle(`
     #ext-autosearch-lock { height: 32px; padding: 0 12px; }
     .rebang-pack-note { font-size: 12px; color: #666; margin: 8px 0; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
     .rebang-log { font-size: 12px; color: #666; padding: 2px 0; }
+    #ext-task-list { margin: 8px 0; max-height: 180px; overflow: auto; }
+    .rebang-task { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.06); }
+    .rebang-task span { color: #666; white-space: nowrap; }
+    #ext-task-summary { font-size: 12px; color: #666; margin: 6px 0; }
+    #ext-skip-user-task { margin: 6px 0 10px; }
     #ex-user-msg { color: #605e5c; }
     .b_dark #rebang-mini-current, .b_dark .rebang-pack-note, .b_dark .rebang-log, .b_dark #ex-user-msg { color: #bbb; }
     @media (prefers-color-scheme: dark) {
@@ -442,19 +457,17 @@ function getKeywordPool(packName) {
 }
 
 function generateDailyKeywords(count, channelName) {
-    let seed = dailyRandomSeed(channelName);
-    let shuffled = seededShuffle(getKeywordPool(channelName), seed);
-    // 如果需要的数量超过词库大小，循环扩展
-    let result = [];
-    while (result.length < count) {
-        for (let i = 0; i < shuffled.length && result.length < count; i++) {
-            result.push({ title: shuffled[i], url: "https://www.bing.com/search?q=" + encodeURIComponent(shuffled[i]) });
-        }
-        // 换个种子再洗一次，避免重复
-        seed = seed + 1;
-        shuffled = seededShuffle(getKeywordPool(channelName), seed);
-    }
-    return result;
+    const plan = BingAssistant.buildKeywordPlan({
+        ...rebangExtensionStore,
+        [BingAssistant.KEYS.selectedChannel]: channelName || getCurrentChannel()
+    }, count);
+    setVal(BingAssistant.KEYS.dailyKeywordPlan, {
+        date: plan.date,
+        pack: plan.pack,
+        words: plan.words,
+        note: plan.note
+    });
+    return plan.items;
 }
 
 // 动态 Key 生成函数
@@ -634,8 +647,9 @@ function getBingPoints() {
     }
 }
 
-function stopAutoSearch(msg, reason) {
+function stopAutoSearch(msg, reason, reasonCode, extra) {
     setVal(autoSearchLockKey, "off");
+    setVal(BingAssistant.KEYS.waitingUserTask, null);
     $("#ext-autosearch-lock").text("开始").removeClass("stop");
     $("#ext-status-indicator").html('● <span class="status-idle">已停止</span>');
     $("#ext-current-keyword").text("-");
@@ -644,6 +658,8 @@ function stopAutoSearch(msg, reason) {
     chrome.runtime.sendMessage({
         type: "RUN_FINISHED",
         reason: reason || "stopped",
+        reasonCode: reasonCode || "",
+        where: extra && extra.where,
         message: msg || "",
         count: Number(getVal(getAutoSearchCountKey(), 0)),
         limit: Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT)),
@@ -668,44 +684,10 @@ function checkAndRandomizeDailyChannel(channelList) {
 
 // 切换到下一个榜单（关键词用完时循环）
 function switchToNextChannel() {
-    let channelList = JSON.parse(sessionStorage.getItem(channelListKey));
-    let currentChannel = getCurrentChannel();
-
-    if (!channelList || channelList.length === 0) {
-        // 没有榜单列表，直接重新生成当前榜单的关键词
-        sessionStorage.removeItem(getCurrentChannelKeywordsCacheKey());
-        localStorage.setItem(currentKeywordIndexKey, 0);
-        initKeywords();
-        return;
-    }
-
-    let currentIndex = channelList.indexOf(currentChannel);
-
-    // 计算下一个榜单索引：到达末尾时循环回到第一个
-    let nextIndex;
-    let isWrapAround = false;
-    if (currentIndex === -1 || currentIndex >= channelList.length - 1) {
-        nextIndex = 0;
-        isWrapAround = true;
-    } else {
-        nextIndex = currentIndex + 1;
-    }
-
-    let nextChannel = channelList[nextIndex];
-
-    if (isWrapAround) {
-        showUserMessage("这批搜索词用完了，正在换一批");
-    } else {
-        showUserMessage("这批搜索词用完了，正在换一批");
-    }
-
-    // 更新状态
-    localStorage.setItem(selectedChannelKey, nextChannel);
+    showUserMessage("这批搜索词用完了，正在换一批", { action: "这批搜索词用完了，正在换一批" });
+    setVal(BingAssistant.KEYS.keywordShuffle, Number(getVal(BingAssistant.KEYS.keywordShuffle, 0)) + 1);
+    sessionStorage.removeItem(getCurrentChannelKeywordsCacheKey());
     localStorage.setItem(currentKeywordIndexKey, 0);
-    sessionStorage.removeItem(`${prefix}${nextChannel}`);
-    $("#ext-channels").val(nextChannel);
-
-    // 加载新榜单关键词
     initKeywords();
 }
 
@@ -736,11 +718,28 @@ function getCurrentChannel() {
 }
 
 function detectLoginState() {
+  const points = getBingPoints();
+  if (points !== null) return "in";
   const name = ($("#id_n").text() || "").trim();
   if (name) return "in";
-  if ($("#id_s").length > 0) return "out";
-  if (getBingPoints() !== null) return "in";
+  const signIn = $("#id_s, #id_l, a[href*='login.live.com'], a[href*='signin']").filter(function() {
+    const label = (($(this).text() || "") + " " + ($(this).attr("aria-label") || "")).trim();
+    return /登录|sign in/i.test(label) || this.id === "id_s";
+  });
+  if (signIn.length > 0) return "out";
+  const snippet = ((document.body && document.body.innerText) || "").slice(0, 2500);
+  if (/请登录|sign in to microsoft|sign in with microsoft/i.test(snippet) && points === null) return "out";
   return "unknown";
+}
+
+function stopForLogin(duringRun) {
+  const copy = BingAssistant.failCopy(BingAssistant.FAIL_CODES.LOGIN, { duringRun: !!duringRun });
+  stopAutoSearch(copy.message, "failed", BingAssistant.FAIL_CODES.LOGIN);
+}
+
+function stopForReason(code, extra) {
+  const copy = BingAssistant.failCopy(code, extra || {});
+  stopAutoSearch(copy.message, "failed", code, extra);
 }
 
 let lastPublishedState = "";
@@ -766,12 +765,16 @@ function publishAssistantState() {
   chrome.storage.local.set(payload).catch(() => {});
 }
 
-function pushRecentLog(msg) {
-  let logs = getVal(BingAssistant.KEYS.recentLogs, []);
-  if (!Array.isArray(logs)) logs = [];
-  logs.unshift({ t: Date.now(), text: String(msg) });
-  setVal(BingAssistant.KEYS.recentLogs, logs.slice(0, 5));
+function pushRunLog(event) {
+  const logs = BingAssistant.appendRunLog(getVal(BingAssistant.KEYS.runLogs, []), event || {});
+  setVal(BingAssistant.KEYS.runLogs, logs);
+  const recent = logs.slice(0, 8).map((item) => ({ t: item.t, text: BingAssistant.formatLogLine(item) }));
+  setVal(BingAssistant.KEYS.recentLogs, recent);
   renderRecentLogs();
+}
+
+function pushRecentLog(msg) {
+  pushRunLog({ action: String(msg || "") });
 }
 
 function renderRecentLogs() {
@@ -789,7 +792,9 @@ function updateMiniBar() {
   const count = Number(getVal(getAutoSearchCountKey(), 0));
   const limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
   const running = getVal(autoSearchLockKey, "off") === "on";
+  const model = BingAssistant.buildViewModel(rebangExtensionStore);
   $("#rebang-mini-progress").text(`电脑搜索 ${count}/${limit}`);
+  $("#ext-task-summary").text(`每日活动 ${model.dailyProgress}`);
   $("#ext-current-count").text(count);
   if (running) {
     $("#ext-autosearch-lock").text("停止").addClass("stop");
@@ -803,9 +808,10 @@ function updateMiniBar() {
   publishAssistantState();
 }
 
-function showUserMessage(msg) {
+function showUserMessage(msg, logEvent) {
   $("#ex-user-msg").text(msg);
-  pushRecentLog(msg);
+  if (logEvent === true) pushRunLog({ action: msg });
+  else if (logEvent && typeof logEvent === "object") pushRunLog(logEvent);
   publishAssistantState();
 }
 
@@ -862,189 +868,311 @@ function addTaskToBlacklist(url) {
 // ==========================================
 // 页面逻辑：Rewards 任务页
 // ==========================================
+
+let pointsMissCount = 0;
+let searchBoxMissCount = 0;
+let rewardsCardMissCount = 0;
+
+function goToRewardsPage(nowTime, currentPoints) {
+    let lastRedirect = Number(getVal(getDailyTaskRedirectTimeKey(), 0));
+    if (nowTime - lastRedirect < 60 * 1000) {
+        let waitSec = Math.ceil((60000 - (nowTime - lastRedirect)) / 1000);
+        showUserMessage(`正在等待每日活动页面准备好（还剩 ${waitSec} 秒）`);
+        return;
+    }
+    setVal(globalLockKey, nowTime);
+    setVal(globalMasterTabKey, currentTabId);
+    showUserMessage("电脑搜索已完成，正在打开每日活动", { action: "电脑搜索已完成，正在打开每日活动" });
+    if (currentPoints !== null) setVal(jumpLastPointsKey, currentPoints);
+    setVal(getDailyTaskRedirectTimeKey(), nowTime);
+    setVal(rewardsClickTimeKey, 0);
+    setVal(rewardsLastPointsKey, -1);
+    setVal(rewardsFailCountKey, 0);
+    setTimeout(() => { window.location.href = BingAssistant.REWARDS_URL; }, 1000);
+}
+
+function currentGoal() {
+    return BingAssistant.normalizeGoal(rebangExtensionStore);
+}
+
+function dailyTasksWanted() {
+    return BingAssistant.goalEnablesDaily(currentGoal());
+}
+
+function cardTitle($card, fallback) {
+    const selectors = BingAssistant.TASK_SELECTORS.title.split(",");
+    for (const selector of selectors) {
+        const text = $card.find(selector.trim()).first().text().replace(/\s+/g, " ").trim();
+        if (text) return text;
+    }
+    const aria = ($card.find("a").first().attr("aria-label") || "").trim();
+    if (aria) return aria;
+    return fallback;
+}
+
+function scanRewardCards() {
+    const selectors = BingAssistant.TASK_SELECTORS;
+    let $cards = $(selectors.cards);
+    if ($cards.length === 0) $cards = $("mee-card, .c-card-content");
+    const previous = BingAssistant.readTaskList(rebangExtensionStore).cards;
+    const prevByUrl = new Map(previous.map((card) => [card.url, card]));
+    const cards = [];
+    $cards.each(function(index) {
+        const $card = $(this);
+        const $link = $card.find(selectors.link).first();
+        const url = ($link.attr("href") || "").trim();
+        const name = cardTitle($card, $link.text().replace(/\s+/g, " ").trim() || ("活动" + (index + 1)));
+        const completed = $card.find(selectors.completed).length > 0;
+        const locked = $card.find(selectors.locked).length > 0;
+        if (!url || url.indexOf("http") !== 0) return;
+        const classified = BingAssistant.classifyTask(name, url);
+        const prev = prevByUrl.get(url);
+        let status = classified.status;
+        let reason = classified.reason;
+        if (completed) {
+            status = BingAssistant.TASK_STATUS.DONE;
+            reason = prev && prev.reason ? prev.reason : "已完成";
+        } else if (locked) {
+            status = BingAssistant.TASK_STATUS.SKIPPED;
+            reason = "未解锁";
+        } else if (prev && prev.status === BingAssistant.TASK_STATUS.DONE) {
+            status = BingAssistant.TASK_STATUS.DONE;
+            reason = prev.reason || reason;
+        }
+        cards.push({
+            id: url,
+            name,
+            url,
+            kind: classified.kind,
+            status,
+            reason,
+            updatedAt: Date.now()
+        });
+    });
+    return cards;
+}
+
+function saveTaskList(cards) {
+    setVal(BingAssistant.KEYS.taskList, {
+        date: getLocalDateStr(),
+        cards
+    });
+}
+
+function renderTaskList(cards) {
+    const box = $("#ext-task-list");
+    if (!box.length) return;
+    const list = Array.isArray(cards) ? cards : [];
+    const summary = BingAssistant.summarizeTasks(list);
+    $("#ext-task-summary").text(`每日活动 ${BingAssistant.formatDailyProgress(summary, dailyTasksWanted(), getVal(getDailyTasksDoneKey(), false) === true)}`);
+    if (!list.length) {
+        box.html('<div class="rebang-log">还没有识别到活动卡片</div>');
+        return;
+    }
+    box.empty();
+    list.slice(0, 12).forEach((card) => {
+        box.append(`<div class="rebang-task">${escapeHtml(truncateText(card.name, 16))}<span>${escapeHtml(BingAssistant.taskStatusLabel(card))}</span></div>`);
+    });
+}
+
+function renderTaskListFromStore() {
+    renderTaskList(BingAssistant.readTaskList(rebangExtensionStore).cards);
+}
+
+function markCard(cards, url, status, reason) {
+    return cards.map((card) => card.url === url ? { ...card, status, reason, updatedAt: Date.now() } : card);
+}
+
+function pickNextTask(cards) {
+    const goal = currentGoal();
+    const blacklist = getTaskBlacklist();
+    const sessionClicked = JSON.parse(sessionStorage.getItem("Rebang_SessionClicked") || "[]");
+    const actionable = cards.filter((card) => {
+        if (card.status === BingAssistant.TASK_STATUS.DONE) return false;
+        if (blacklist.includes(card.url) || sessionClicked.includes(card.url)) return false;
+        return true;
+    });
+    const autoCard = actionable.find((card) => card.kind === BingAssistant.TASK_KIND.EXPLORE && card.status === BingAssistant.TASK_STATUS.AUTO);
+    if (autoCard) return { card: autoCard, mode: "auto" };
+    if (goal === BingAssistant.GOALS.TRY_ALL) {
+        const manualCard = actionable.find((card) => card.status === BingAssistant.TASK_STATUS.MANUAL);
+        if (manualCard) return { card: manualCard, mode: "manual" };
+    }
+    return null;
+}
+
+function finishDailyAndReturn(msg, logEvent) {
+    setVal(getDailyTasksDoneKey(), true);
+    setVal(BingAssistant.KEYS.waitingUserTask, null);
+    sessionStorage.removeItem("Rebang_SessionClicked");
+    if (msg) showUserMessage(msg, logEvent || { action: msg });
+    const count = Number(getVal(getAutoSearchCountKey(), 0));
+    const limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+    setTimeout(() => {
+        if (count >= limit) stopAutoSearch(msg || "今天的任务已完成", "complete");
+        window.location.href = BingAssistant.SEARCH_URL;
+    }, 1200);
+}
+
 function handleRewardsPage() {
-    // 1. 基础状态检查
     let isLocked = getVal(autoSearchLockKey, "off");
     let currentPoints = getBingPoints();
-
-    // 更新积分显示
     if (currentPoints !== null) {
         $("#ext-rewards-points").text(currentPoints);
         setVal(lastPointsKey, currentPoints);
     }
+    publishAssistantState();
 
-    // 脚本未开启或未启用每日任务时退出
+    const cards = scanRewardCards();
+    if (cards.length) {
+        rewardsCardMissCount = 0;
+        saveTaskList(cards);
+        renderTaskList(cards);
+        const loggedSkipKey = "Rebang_LoggedSkip";
+        let logged = JSON.parse(sessionStorage.getItem(loggedSkipKey) || "[]");
+        cards.forEach((card) => {
+            if ((card.status === BingAssistant.TASK_STATUS.SKIPPED || card.status === BingAssistant.TASK_STATUS.UNKNOWN) && !logged.includes(card.url)) {
+                logged.push(card.url);
+                pushRunLog({
+                    action: `跳过「${card.name}」`,
+                    result: "已跳过",
+                    reason: card.reason || "识别失败"
+                });
+            }
+        });
+        sessionStorage.setItem(loggedSkipKey, JSON.stringify(logged));
+    } else {
+        renderTaskList(BingAssistant.readTaskList(rebangExtensionStore).cards);
+    }
+
     if (isLocked !== "on") return;
-    if (getVal(enableDailyTasksKey, false) !== true) {
-        showUserMessage("安全模式已开，正在返回搜索");
+
+    const login = detectLoginState();
+    if (login === "out") {
+        stopForLogin(true);
+        return;
+    }
+    if (!navigator.onLine) {
+        stopForReason(BingAssistant.FAIL_CODES.NETWORK);
+        return;
+    }
+    if (!dailyTasksWanted()) {
+        showUserMessage("安全模式已开，正在返回搜索", { action: "安全模式已开，正在返回搜索" });
         setTimeout(() => { window.location.href = BingAssistant.SEARCH_URL; }, 1000);
         return;
     }
 
-    // 2. 冷却时间检查
+    if (!cards.length) {
+        rewardsCardMissCount += 1;
+        if (document.readyState === "complete" && rewardsCardMissCount >= 8) {
+            const copy = BingAssistant.failCopy(BingAssistant.FAIL_CODES.PAGE_CHANGED, { where: "rewards" });
+            finishDailyAndReturn(copy.message, { action: "每日活动", result: "识别失败", reason: "页面改版", reasonCode: BingAssistant.FAIL_CODES.PAGE_CHANGED });
+            return;
+        }
+        showUserMessage("正在读取每日活动...");
+        return;
+    }
+
+    const waiting = getVal(BingAssistant.KEYS.waitingUserTask, null);
+    if (waiting && waiting.url) {
+        const current = cards.find((card) => card.url === waiting.url);
+        if (current && current.status === BingAssistant.TASK_STATUS.DONE) {
+            setVal(BingAssistant.KEYS.waitingUserTask, null);
+            showUserMessage(`“${truncateText(waiting.name, 10)}”已完成，继续处理`, { action: `“${waiting.name}”`, result: "已完成" });
+        } else {
+            showUserMessage(`需要你点一下：${waiting.name || "每日活动"}`);
+            $("#ext-skip-user-task").show();
+            return;
+        }
+    }
+    $("#ext-skip-user-task").hide();
+
     let lastClickTime = Number(getVal(rewardsClickTimeKey, 0));
     let now = new Date().getTime();
     if (now - lastClickTime < 5000) {
         let left = Math.ceil((5000 - (now - lastClickTime)) / 1000);
         showUserMessage(`正在确认刚才的活动是否加分（还剩 ${left} 秒）`);
-        // 修复：不再强制刷新，让时间自然耗尽后由下一次轮询处理
         return;
     }
 
-    // 3. 获取任务卡片 (修复：扩大选择范围，包含每日任务和更多任务)
-    // 兼容新旧版面，查找页面所有的 mee-card
-    let $cards = $("mee-card");
-    if ($cards.length === 0) {
-        // 尝试备用选择器 (针对部分新版UI)
-        $cards = $(".c-card-content");
-    }
-
-    if ($cards.length === 0) { showUserMessage("正在读取每日活动..."); return; }
-
-    // 状态准备
     let rewardsLastPoints = Number(getVal(rewardsLastPointsKey, -1));
     let failCount = Number(getVal(rewardsFailCountKey, 0));
     let maxRetries = Number(getVal(dailyTaskMaxRetriesKey, 3));
-    let blacklist = getTaskBlacklist();
+    const lastTarget = JSON.parse(sessionStorage.getItem("Rebang_LastTask") || "null");
 
-    // 获取本次运行已点击过的任务
-    let sessionClicked = JSON.parse(sessionStorage.getItem("Rebang_SessionClicked") || "[]");
-
-    let targetLink = null;
-    let targetName = "";
-    let targetUrl = "";
-    let hasPending = false;
-
-    // >>>>>>>>>> 遍历任务逻辑 <<<<<<<<<<
-    $cards.each(function(index) {
-        if (targetLink) return; // 找到一个目标就停止
-
-        let $card = $(this);
-
-        // [Check 1] 是否已完成 (绿色勾选)
-        // 查找多种完成图标样式
-        let $completedIcon = $card.find(".mee-icon-SkypeCircleCheck, .c-icon.check, i[class*='check']");
-        if ($completedIcon.length > 0) return;
-
-        // [Check 2] 是否被锁定 (未解锁的任务)
-        if ($card.find(".locked-card").length > 0) return;
-
-        // [Check 3] 获取链接 (优先找卡片内的链接)
-        let $link = $card.find("a").first();
-        if ($link.length === 0) return;
-
-        let url = $link.attr("href");
-        let name = $link.text().trim() || ("任务" + index);
-
-        // [Check 4] 协议过滤
-        if (!url || url.indexOf("http") !== 0) {
-            // 忽略非http链接 (如 edge://)
-            return;
-        }
-
-        // [Check 5] 本次会话防重复
-        if (sessionClicked.includes(url)) {
-            return;
-        }
-
-        // [Check 6] 黑名单检查
-        if (blacklist.includes(url)) {
-            if (TEST_MODE === 1) {
-                console.log(`[Rebang] 测试模式 - 强制重试黑名单任务: ${name}`);
+    if (lastTarget && rewardsLastPoints !== -1 && currentPoints !== null) {
+        if (currentPoints > rewardsLastPoints) {
+            const gained = currentPoints - rewardsLastPoints;
+            const updated = markCard(cards, lastTarget.url, BingAssistant.TASK_STATUS.DONE, `积分 +${gained}`);
+            saveTaskList(updated);
+            renderTaskList(updated);
+            showUserMessage(`“${truncateText(lastTarget.name, 10)}”已得分`, { action: `打开「${lastTarget.name}」`, result: `积分 +${gained}` });
+            setVal(rewardsFailCountKey, 0);
+            sessionStorage.removeItem("Rebang_LastTask");
+        } else {
+            failCount += 1;
+            setVal(rewardsFailCountKey, failCount);
+            if (failCount >= maxRetries) {
+                addTaskToBlacklist(lastTarget.url);
+                const updated = markCard(cards, lastTarget.url, BingAssistant.TASK_STATUS.SKIPPED, "多次没有加分");
+                saveTaskList(updated);
+                renderTaskList(updated);
+                showUserMessage(`“${truncateText(lastTarget.name, 8)}”多次没有加分，已跳过`, { action: `跳过「${lastTarget.name}」`, result: "已跳过", reason: "多次没有加分" });
+                setVal(rewardsFailCountKey, 0);
+                sessionStorage.removeItem("Rebang_LastTask");
             } else {
-                return; // 正常跳过
+                showUserMessage(`正在确认「${truncateText(lastTarget.name, 10)}」是否加分（${failCount}/${maxRetries}）`);
+                return;
             }
         }
-
-        // 找到有效任务
-        hasPending = true;
-        targetLink = $link; // 保存 jQuery 对象，而非仅 URL
-        targetName = name;
-        targetUrl = url;
-    });
-
-    // ----------------------------------------------------
-    // 后续执行逻辑
-    // ----------------------------------------------------
-
-    // 积分验证：如果积分涨了，重置失败计数
-    if (rewardsLastPoints !== -1 && currentPoints !== null) {
-        if (currentPoints > rewardsLastPoints) {
-            failCount = 0;
-            setVal(rewardsFailCountKey, 0);
-        }
     }
 
-    // 熔断：拉黑 (次数过多则拉黑)
-    if (hasPending && targetLink && failCount >= maxRetries) {
-        showUserMessage(`“${truncateText(targetName,8)}”多次没有加分，已跳过`);
-        addTaskToBlacklist(targetUrl);
-        setVal(rewardsFailCountKey, 0);
-        setTimeout(() => { location.reload(); }, 1500);
+    const latestCards = BingAssistant.readTaskList(rebangExtensionStore).cards;
+    const next = pickNextTask(latestCards);
+    if (!next) {
+        finishDailyAndReturn("每日活动已处理完，正在返回搜索");
         return;
     }
 
-    // 全部完成
-    if (!hasPending) {
-        setVal(getDailyTasksDoneKey(), true);
-        sessionStorage.removeItem("Rebang_SessionClicked");
-        setVal(lastPointsKey, null);
-
-        showUserMessage("每日活动已处理完，正在返回搜索");
-        setTimeout(() => {
-             window.location.href = "https://www.bing.com/search?q=Bing+Rewards+Done";
-        }, 1500);
-        return;
-    }
-
-    // 执行点击
-    if (hasPending && targetLink) {
-        // 预判失败逻辑
-        if (rewardsLastPoints !== -1 && currentPoints !== null && currentPoints <= rewardsLastPoints) {
-             failCount++;
-             setVal(rewardsFailCountKey, failCount);
-             if (failCount >= maxRetries) {
-                 location.reload();
-                 return;
-             }
-        } else if (currentPoints > rewardsLastPoints) {
-            failCount = 0;
-            setVal(rewardsFailCountKey, 0);
-        }
-
-        showUserMessage(`正在打开活动：${truncateText(targetName, 10)}`);
-
-        if (currentPoints !== null) setVal(rewardsLastPointsKey, currentPoints);
-        setVal(rewardsClickTimeKey, now);
-
-        sessionClicked.push(targetUrl);
+    const target = next.card;
+    if (target.status === BingAssistant.TASK_STATUS.SKIPPED || target.status === BingAssistant.TASK_STATUS.UNKNOWN) {
+        showUserMessage(`跳过「${truncateText(target.name, 10)}」（${target.reason || "识别失败"}）`, { action: `跳过「${target.name}」`, result: "已跳过", reason: target.reason || "识别失败" });
+        const sessionClicked = JSON.parse(sessionStorage.getItem("Rebang_SessionClicked") || "[]");
+        sessionClicked.push(target.url);
         sessionStorage.setItem("Rebang_SessionClicked", JSON.stringify(sessionClicked));
+        return;
+    }
 
-        // ==================================================
-        // 【核心修复】直接操作 DOM 元素点击
-        // ==================================================
-        try {
-            // 1. 强制设置为新标签页打开，防止当前页面跳转
-            targetLink.attr('target', '_blank');
+    if (next.mode === "manual") {
+        setVal(BingAssistant.KEYS.waitingUserTask, { name: target.name, url: target.url, kind: target.kind, reason: target.reason });
+        showUserMessage(`需要你点一下：${target.name}`, { action: `需要你点一下：${target.name}`, reason: target.reason });
+        $("#ext-skip-user-task").show();
+        return;
+    }
 
-            // 2. 模拟原生点击事件 (比 click() 更底层，穿透力更强)
-            // 先尝试 jQuery 的 click
-            targetLink[0].click();
+    const $link = $("a[href]").filter(function() { return (this.getAttribute("href") || "") === target.url; }).first();
+    if (!$link.length) {
+        const updated = markCard(latestCards, target.url, BingAssistant.TASK_STATUS.UNKNOWN, "页面改版");
+        saveTaskList(updated);
+        showUserMessage("找不到这张活动卡片，页面可能已改版", { action: `「${target.name}」`, result: "识别失败", reason: "页面改版", reasonCode: BingAssistant.FAIL_CODES.PAGE_CHANGED });
+        return;
+    }
 
-            // 如果上面没反应，或者为了保险，稍微延迟后再检查
-            console.log(`[Rebang] Triggered click on: ${targetName}`);
-
-        } catch (e) {
-            console.error("[Rebang] 点击异常，尝试备用方案:", e);
-            // 兜底方案：直接打开窗口
-            window.open(targetUrl, '_blank');
-        }
+    showUserMessage(`正在打开活动：${truncateText(target.name, 10)}`, { action: `打开「${target.name}」`, result: "可自动完成" });
+    if (currentPoints !== null) setVal(rewardsLastPointsKey, currentPoints);
+    setVal(rewardsClickTimeKey, now);
+    const sessionClicked = JSON.parse(sessionStorage.getItem("Rebang_SessionClicked") || "[]");
+    sessionClicked.push(target.url);
+    sessionStorage.setItem("Rebang_SessionClicked", JSON.stringify(sessionClicked));
+    sessionStorage.setItem("Rebang_LastTask", JSON.stringify({ name: target.name, url: target.url }));
+    try {
+        $link.attr("target", "_blank");
+        $link[0].click();
+    } catch (error) {
+        window.open(target.url, "_blank");
     }
 }
 
-// ==========================================
-// Bing 搜索页
-// ==========================================
 function doAutoSearch() {
   // --- 多标签页互斥检查 (要求1 & 4) ---
   // 每次执行搜索前，先同步状态。如果不是主控页，且有其他页面刚跑过，则跳过本次执行。
@@ -1065,74 +1193,55 @@ function doAutoSearch() {
   // -----------------------------------
 
   // 【修复关键】：优先读取 UI 复选框的实时状态，防止存储延迟导致读取为 false
-  let enableDaily = $("#ext-enable-dailytasks").length > 0
-      ? $("#ext-enable-dailytasks").is(":checked")
-      : getVal(enableDailyTasksKey, false);
+  let enableDaily = dailyTasksWanted();
+  let dailyDone = getVal(getDailyTasksDoneKey(), false) === true || getVal(getDailyTasksDoneKey(), false) === "true";
 
-  let dailyDone = getVal(getDailyTasksDoneKey(), false);
-
-  // 1. 每日任务跳转逻辑 (优先执行)
-  if (enableDaily && !dailyDone) {
-      let lastRedirect = Number(getVal(getDailyTaskRedirectTimeKey(), 0));
-      // 任务页跳转冷却 (60秒)
-      if (nowTime - lastRedirect < 60 * 1000) {
-          let waitSec = Math.ceil((60000 - (nowTime - lastRedirect)) / 1000);
-          showUserMessage(`正在等待每日活动页面准备好（还剩 ${waitSec} 秒）`);
+  if (!navigator.onLine) {
+      stopForReason(BingAssistant.FAIL_CODES.NETWORK);
+      return;
+  }
+  const login = detectLoginState();
+  if (login === "out") {
+      stopForLogin(true);
+      return;
+  }
+  if ($("#sb_form_q").length === 0 && document.readyState === "complete") {
+      searchBoxMissCount += 1;
+      if (searchBoxMissCount >= 8) {
+          stopForReason(BingAssistant.FAIL_CODES.PAGE_CHANGED, { where: "search" });
           return;
       }
+      showUserMessage("正在查找搜索框...");
+      return;
+  }
+  searchBoxMissCount = 0;
 
-      // 抢占锁，防止其他页面同时也跳
-      setVal(globalLockKey, nowTime);
-      setVal(globalMasterTabKey, currentTabId);
-
-      let currentPoints = getBingPoints();
-      let jumpLastPoints = Number(getVal(jumpLastPointsKey, -1));
-      let jumpFailCount = Number(getVal(jumpFailCountKey, 0));
-
-      let uiMaxRetries = $("#ext-daily-retries").length ? Number($("#ext-daily-retries").val()) : -1;
-      let maxRetries = uiMaxRetries >= 0 ? uiMaxRetries : Number(getVal(dailyTaskMaxRetriesKey, 3));
-
-      // 验证上次跳转是否有收益
-      if (jumpLastPoints !== -1 && currentPoints !== null) {
-          if (currentPoints > jumpLastPoints) {
-              jumpFailCount = 0;
-              setVal(jumpFailCountKey, 0);
-          } else {
-              jumpFailCount++;
-              setVal(jumpFailCountKey, jumpFailCount);
-          }
-      }
-
-      // 跳转失败过多，放弃任务
-      if (jumpFailCount > maxRetries) {
-          showUserMessage("每日活动多次没有加分，已跳过，继续搜索");
-          setVal(getDailyTasksDoneKey(), true);
+  let currentPoints = getBingPoints();
+  if (currentPoints === null) {
+      pointsMissCount += 1;
+      if (document.readyState === "complete" && pointsMissCount >= 8) {
+          if (login === "in") stopForReason(BingAssistant.FAIL_CODES.PAGE_CHANGED, { where: "search" });
+          else stopForLogin(true);
           return;
       }
+      showUserMessage("正在确认登录和积分...");
+      return;
+  }
+  pointsMissCount = 0;
 
-      showUserMessage("正在打开每日活动页面");
-
-      if (currentPoints !== null) setVal(jumpLastPointsKey, currentPoints);
-      setVal(getDailyTaskRedirectTimeKey(), nowTime);
-      setVal(rewardsClickTimeKey, 0);
-      setVal(rewardsLastPointsKey, -1);
-      setVal(rewardsFailCountKey, 0);
-
-      setTimeout(() => {
-          window.location.href = "https://rewards.bing.com/";
-      }, 1000);
+  const currentSearchCountNow = Number(getVal(getAutoSearchCountKey(), 0));
+  const limitSearchCountNow = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+  if (currentSearchCountNow >= limitSearchCountNow) {
+      if (enableDaily && !dailyDone) {
+          goToRewardsPage(nowTime, currentPoints);
+          return;
+      }
+      setVal(lastPointsKey, null);
+      setVal(globalMasterStatusKey, "IDLE");
+      stopAutoSearch("今天的电脑搜索已完成", "complete");
       return;
   }
 
-  // 2. 搜索刷分主逻辑
-  let currentPoints = getBingPoints();
-  if (currentPoints === null) {
-      if (document.readyState === 'complete') { currentPoints = 0; }
-      else { return; }
-  }
-
-  // 搜索冷却时间检查 (基于本地时间，防止刷太快)
-  // 修复：统一使用时间戳（毫秒）存储，避免 Date.toString() 的跨浏览器兼容问题
   let jobLockExpires = Number(getVal(autoSearchLockExpiresKey, 0));
   let now = Date.now();
 
@@ -1168,8 +1277,8 @@ function doAutoSearch() {
 
           // 连续无积分保护逻辑
           if (consecutiveNoGain >= maxNoGainLimit) {
-              // 直接停止，不再尝试新建页面
-              stopAutoSearch(`连续 ${maxNoGainLimit} 次搜索没有加分，今天可能已经满额，或账号被限制。已停止。`, "failed");
+              const code = currentSearchCount === 0 ? BingAssistant.FAIL_CODES.RISK : BingAssistant.FAIL_CODES.NO_GAIN;
+              stopForReason(code, { limit: maxNoGainLimit });
               return;
           }
       }
@@ -1188,10 +1297,11 @@ function doAutoSearch() {
   // 每日搜索次数限制
   if (currentSearchCount >= limitSearchCount) {
       setVal(lastPointsKey, null);
-
-      // 【新增】: 搜完了，先把全局状态设为 IDLE，让别的页面赶紧接手
       setVal(globalMasterStatusKey, "IDLE");
-
+      if (enableDaily && !dailyDone) {
+          goToRewardsPage(Date.now(), currentPoints);
+          return;
+      }
       stopAutoSearch("今天的电脑搜索已完成", "complete");
       return;
   }
@@ -1215,12 +1325,26 @@ function doAutoSearch() {
     setVal(lastPointsKey, currentPoints);
 
     currentKeywordIndex++;
+    const blocked = new Set(BingAssistant.normalizeStringList(getVal(BingAssistant.KEYS.blockedKeywords, [])));
+    while (currentKeywordIndex <= keywords.length && blocked.has(keywords[currentKeywordIndex - 1].title)) {
+      currentKeywordIndex++;
+    }
+    if (currentKeywordIndex > keywords.length) {
+      localStorage.setItem(currentKeywordIndexKey, currentKeywordIndex);
+      switchToNextChannel();
+      return;
+    }
     localStorage.setItem(currentKeywordIndexKey, currentKeywordIndex);
 
-    let msg = isPointsIncreased
-        ? `积分 +${currentPoints - Number(lastPoints)}。`
-        : (lastPoints !== null ? `这次没有加分（${consecutiveNoGain}/${maxNoGainLimit}）。` : "");
-    showUserMessage(`${msg}正在搜索：${truncateText(keywords[currentKeywordIndex - 1].title, 15)}`);
+    const word = keywords[currentKeywordIndex - 1].title;
+    let result = isPointsIncreased
+        ? `积分 +${currentPoints - Number(lastPoints)}`
+        : (lastPoints !== null ? `这次没有加分（${consecutiveNoGain}/${maxNoGainLimit}）` : "");
+    let msg = result ? `${result}。` : "";
+    showUserMessage(`${msg}正在搜索：${truncateText(word, 15)}`, {
+        action: `电脑搜索 ${currentSearchCount}/${limitSearchCount}  ${word}`,
+        result
+    });
 
     // 立即更新关键词列表的高亮位置（页面跳转前用户就能看到变化）
     renderKeywords(keywords);
@@ -1230,7 +1354,7 @@ function doAutoSearch() {
     $("#ext-current-keyword").text(currentKw);
     updateMiniBar();
 
-    doSearch(keywords[currentKeywordIndex - 1].title);
+    doSearch(word);
   } else {
     // 如果没有关键词或搜完了
     if (!keywords) {
@@ -1259,18 +1383,27 @@ function initChannels(channels, selectedChannel) {
 function initKeywords() {
   var cacheKey = getCurrentChannelKeywordsCacheKey();
   var keywords = JSON.parse(sessionStorage.getItem(cacheKey));
-
-  // 如果本地有缓存，直接渲染
+  const plan = getVal(BingAssistant.KEYS.dailyKeywordPlan, null);
+  const blocked = new Set(BingAssistant.normalizeStringList(getVal(BingAssistant.KEYS.blockedKeywords, [])));
+  if (plan && plan.date === getLocalDateStr() && Array.isArray(plan.words) && plan.words.length) {
+    keywords = plan.words.filter((word) => !blocked.has(word)).map((title) => ({
+      title,
+      url: "https://www.bing.com/search?q=" + encodeURIComponent(title)
+    }));
+    if (keywords.length) {
+      sessionStorage.setItem(cacheKey, JSON.stringify(keywords));
+      renderKeywords(keywords);
+      return;
+    }
+  }
   if (keywords && keywords.length > 0) {
     renderKeywords(keywords);
   } else {
-    // 本地生成关键词（每天自动换序，无需网络请求）
     var limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
-    keywords = generateDailyKeywords(limit + 10, getCurrentChannel());
+    keywords = generateDailyKeywords(limit + 10, getCurrentChannel()).filter((item) => !blocked.has(item.title));
     sessionStorage.setItem(cacheKey, JSON.stringify(keywords));
     renderKeywords(keywords);
-    showUserMessage("今日词库已生成 · 基于本地词包 · 未使用热榜");
-    console.log(`[Rebang] 本地生成 ${keywords.length} 个关键词 (日期:${getLocalDateStr()})`);
+    showUserMessage(BingAssistant.KEYWORD_NOTE, { action: BingAssistant.KEYWORD_NOTE });
   }
 }
 
@@ -1438,13 +1571,16 @@ function initRewardsControls() {
         <div id="rebang-header">
             <span id="rebang-dot" class="status-dot running"></span>
             <span id="rebang-title">每日活动</span>
-            <span id="rebang-mini-progress">正在处理</span>
+            <span id="rebang-mini-progress">每日活动</span>
             <button id="ext-stop-rewards" class="rebang-btn stop" type="button">停止</button>
             <span id="rebang-toggle-icon" class="rebang-btn-icon" title="展开">−</span>
         </div>
         <div id="rebang-body">
             <div class="control-row">当前积分：<span id="ext-rewards-points">--</span></div>
+            <div id="ext-task-summary">每日活动 待识别</div>
             <label id="ex-user-msg">正在读取每日活动</label>
+            <div id="ext-task-list"></div>
+            <button id="ext-skip-user-task" class="rebang-btn" type="button" style="display:none">跳过这张</button>
             <div id="ext-recent-logs"></div>
         </div>
     </div>`;
@@ -1460,6 +1596,19 @@ function initRewardsControls() {
         setTimeout(() => {
             window.location.href = BingAssistant.SEARCH_URL;
         }, 1000);
+    });
+    $("#ext-skip-user-task").click(function() {
+        const waiting = getVal(BingAssistant.KEYS.waitingUserTask, null);
+        if (!waiting || !waiting.url) return;
+        const cards = markCard(BingAssistant.readTaskList(rebangExtensionStore).cards, waiting.url, BingAssistant.TASK_STATUS.SKIPPED, "你跳过了这张");
+        saveTaskList(cards);
+        renderTaskList(cards);
+        const sessionClicked = JSON.parse(sessionStorage.getItem("Rebang_SessionClicked") || "[]");
+        sessionClicked.push(waiting.url);
+        sessionStorage.setItem("Rebang_SessionClicked", JSON.stringify(sessionClicked));
+        setVal(BingAssistant.KEYS.waitingUserTask, null);
+        showUserMessage(`已跳过「${waiting.name}」`, { action: `跳过「${waiting.name}」`, result: "已跳过", reason: "你跳过了这张" });
+        $("#ext-skip-user-task").hide();
     });
 }
 
@@ -1481,9 +1630,11 @@ function initSearchControls() {
         </div>
         <div id="rebang-body">
             <label id="ex-user-msg"></label>
+            <div id="ext-task-summary">每日活动 未开启（安全模式）</div>
             <div class="rebang-pack-note">
                 <span>今日词库已生成 · 基于本地词包 · 未使用热榜</span>
                 <button id="ext-keywords-refresh" class="rebang-btn" type="button">换一批</button>
+                <button id="ext-block-keyword" class="rebang-btn" type="button">拉黑当前词</button>
             </div>
             <div id="ext-recent-logs"></div>
             <div id="ext-keywords-list"></div>
@@ -1503,7 +1654,7 @@ function initSearchControls() {
     restoreWidgetPosition();
     bindMiniBarToggle();
 
-    const DEFAULT_CHANNELS = [BingAssistant.WORD_PACK_SHORT, BingAssistant.WORD_PACK_LONG];
+    const DEFAULT_CHANNELS = [BingAssistant.WORD_PACK_SHORT, BingAssistant.WORD_PACK_LONG, BingAssistant.WORD_PACK_CUSTOM];
     let channelList = sessionStorage.getItem(channelListKey);
     let listArr = DEFAULT_CHANNELS;
     if (channelList !== null) {
@@ -1544,9 +1695,20 @@ function initSearchControls() {
       initKeywords();
   });
   $("#ext-keywords-refresh").off("click.rebang").on("click.rebang", function () {
+      setVal(BingAssistant.KEYS.keywordShuffle, Number(getVal(BingAssistant.KEYS.keywordShuffle, 0)) + 1);
+      setVal(BingAssistant.KEYS.dailyKeywordPlan, null);
       sessionStorage.removeItem(getCurrentChannelKeywordsCacheKey());
       localStorage.setItem(currentKeywordIndexKey, 0);
       initKeywords();
+  });
+  $("#ext-block-keyword").off("click.rebang").on("click.rebang", function () {
+      const word = (getVal(BingAssistant.KEYS.lastKeyword, "") || $("#ext-current-keyword").text() || "").trim();
+      if (!word || word === "-") {
+          showUserMessage("还没有当前搜索词");
+          return;
+      }
+      chrome.runtime.sendMessage({ type: "BLOCK_KEYWORD", word }).catch(() => {});
+      showUserMessage(`已拉黑「${word}」，今天不再搜`);
   });
   $("#rebang-open-options").off("click.rebang").on("click.rebang", function () {
       chrome.runtime.openOptionsPage();
@@ -1567,11 +1729,15 @@ function initSearchControls() {
 
         let limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
         let current = Number(getVal(getAutoSearchCountKey(), 0));
-        let dailyEnabled = getVal(enableDailyTasksKey, false);
+        let dailyEnabled = dailyTasksWanted();
         let dailyDone = getVal(getDailyTasksDoneKey(), false);
 
         if (current >= limit && (!dailyEnabled || dailyDone)) {
             showUserMessage("今天的任务已经完成");
+            return;
+        }
+        if (detectLoginState() === "out") {
+            stopForLogin(false);
             return;
         }
 
@@ -1585,7 +1751,7 @@ function initSearchControls() {
         setVal(BingAssistant.KEYS.productState, "running");
         setVal(BingAssistant.KEYS.runStartedAt, Date.now());
         $(this).text("停止").addClass("stop");
-        showUserMessage("正在开始今天的任务");
+        showUserMessage("正在开始今天的任务", { action: "开始今日任务" });
         setVal(autoSearchLockExpiresKey, 0);
         setVal(lastPointsKey, null);
         updateMiniBar();

@@ -17,9 +17,29 @@ const stat3Value = document.getElementById("stat-3-value");
 const progressBar = document.getElementById("progress-bar");
 const primaryBtn = document.getElementById("primary-btn");
 const hint = document.getElementById("hint");
+const logBox = document.getElementById("log-box");
 
 function send(type, extra = {}) {
   return chrome.runtime.sendMessage({ type, ...extra });
+}
+
+function renderLogs(model) {
+  const logs = (model.logs || []).slice(0, 6);
+  if (!logs.length) {
+    logBox.hidden = true;
+    logBox.innerHTML = "";
+    return;
+  }
+  logBox.hidden = false;
+  logBox.innerHTML = logs.map((entry) => `<div>${escapeHtml(A.formatLogLine(entry))}</div>`).join("");
+}
+
+function escapeHtml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function render(store) {
@@ -42,14 +62,13 @@ function render(store) {
   stat1Label.textContent = "电脑搜索";
   stat1Value.textContent = `${model.count}/${model.limit}`;
   stat2Label.textContent = "每日活动";
-  stat2Value.textContent = model.dailyEnabled
-    ? (model.dailyDone ? "已完成" : "已开启")
-    : "未开启（安全模式）";
+  stat2Value.textContent = model.dailyProgress;
 
   const percent = Math.min(100, Math.round((model.count / model.limit) * 100));
   progressBar.style.width = `${percent}%`;
   primaryBtn.classList.toggle("stop", model.state === "running");
   primaryBtn.disabled = false;
+  renderLogs(model);
 
   if (model.state === "logged_out") {
     stateLine.textContent = "还没有检测到微软账号";
@@ -62,9 +81,17 @@ function render(store) {
   }
 
   if (model.state === "running") {
-    stateLine.textContent = `正在搜索 ${model.count}/${model.limit}`;
-    stat3Label.textContent = "当前搜索";
-    stat3Value.textContent = model.keyword || "准备中";
+    if (model.count >= model.limit && model.dailyEnabled) {
+      stateLine.textContent = model.waitingTask
+        ? `需要你点一下：${model.waitingTask.name || "每日活动"}`
+        : "正在处理每日活动";
+      stat3Label.textContent = "当前活动";
+      stat3Value.textContent = model.waitingTask?.name || model.keyword || "读取任务清单";
+    } else {
+      stateLine.textContent = `正在搜索 ${model.count}/${model.limit}`;
+      stat3Label.textContent = "当前搜索";
+      stat3Value.textContent = model.keyword || "准备中";
+    }
     primaryBtn.textContent = "停止";
     hint.textContent = model.statusMessage || "正在模拟常规搜索，间隔 8-14 秒。";
     if (model.elapsedMs > 0) {
@@ -76,12 +103,14 @@ function render(store) {
 
   if (model.state === "complete") {
     const duration = model.summary?.durationMs || model.elapsedMs;
-    stateLine.textContent = "今天的电脑搜索已完成";
+    stateLine.textContent = model.dailyEnabled ? "今天的任务已完成" : "今天的电脑搜索已完成";
     stat3Label.textContent = "用时";
     stat3Value.textContent = duration ? A.formatDuration(duration) : "已完成";
     primaryBtn.textContent = "打开 Bing";
     hint.textContent = model.dailyEnabled
-      ? (model.dailyDone ? "每日活动已处理。" : "每日活动仍待处理。")
+      ? (model.dailyDone || model.dailySummary.autoPending === 0
+        ? (model.dailySummary.manual > 0 ? `还有 ${model.dailySummary.manual} 个活动需要你点一下。` : "每日活动已处理。")
+        : "每日活动仍待处理。")
       : "未处理每日活动（安全模式已开）";
     primaryBtn.dataset.action = "open";
     return;
@@ -90,10 +119,10 @@ function render(store) {
   if (model.state === "failed") {
     stateLine.textContent = "这次没有完成，已停止";
     stat3Label.textContent = "原因";
-    stat3Value.textContent = "连续多次没有加分";
-    primaryBtn.textContent = "重试";
-    hint.textContent = model.lastError || "请确认已登录微软账号，然后重试。";
-    primaryBtn.dataset.action = "start";
+    stat3Value.textContent = model.failShort || "已停止";
+    primaryBtn.textContent = model.failReasonCode === A.FAIL_CODES.LOGIN ? "打开 Bing 并登录" : "重试";
+    hint.textContent = model.failMessage || model.failNext || "请确认已登录微软账号，然后重试。";
+    primaryBtn.dataset.action = model.failReasonCode === A.FAIL_CODES.LOGIN ? "login" : "start";
     return;
   }
 
@@ -101,7 +130,9 @@ function render(store) {
   stat3Label.textContent = "下次自动开始";
   stat3Value.textContent = model.schedule.enabled ? model.nextRunLabel : `未设置，建议${A.suggestedTimeLabel()}`;
   primaryBtn.textContent = "开始今日任务";
-  hint.textContent = "完整电脑搜索大约 6-10 分钟，期间请保持浏览器运行。";
+  hint.textContent = model.dailyEnabled
+    ? `今日目标：${model.goalLabel}。完整电脑搜索大约 6-10 分钟。`
+    : "完整电脑搜索大约 6-10 分钟，期间请保持浏览器运行。";
   primaryBtn.dataset.action = "start";
 }
 

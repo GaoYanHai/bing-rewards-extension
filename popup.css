@@ -130,3 +130,16 @@ footer {
   font-size: 12px;
   padding: 0;
 }
+
+.log-box {
+  max-height: 84px;
+  overflow: auto;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--card);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.log-box div + div { margin-top: 2px; }
