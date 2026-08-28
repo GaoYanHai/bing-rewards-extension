@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bing 积分助手</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main id="app">
+    <section id="view-risk" class="view" hidden>
+      <header class="brand">
+        <img src="icons/icon32.png" alt="">
+        <div>
+          <h1>Bing 积分助手</h1>
+          <p>使用前请先了解风险</p>
+        </div>
+      </header>
+      <div class="card warning">
+        <p>自动搜索和自动点击可能不符合 Microsoft Rewards 使用规则，存在积分无效或账号受限的风险。请自行判断是否使用。</p>
+        <p class="fineprint">本扩展只会在浏览器开着时工作。电脑关机、睡眠，或浏览器完全退出时，无法自己启动。</p>
+      </div>
+      <label class="check-row">
+        <input type="checkbox" id="risk-check">
+        <span>我已了解风险，并自行承担使用后果</span>
+      </label>
+      <button id="risk-accept" class="primary" disabled>开始使用</button>
+    </section>
+
+    <section id="view-main" class="view" hidden>
+      <header class="brand">
+        <img src="icons/icon32.png" alt="">
+        <div>
+          <h1>Bing 积分助手</h1>
+          <p id="account-line">尚未检测账号</p>
+        </div>
+      </header>
+      <p id="state-line" class="state-line">今天还没开始</p>
+      <div class="stats">
+        <div class="stat">
+          <span id="stat-1-label">电脑搜索</span>
+          <strong id="stat-1-value">0/30</strong>
+        </div>
+        <div class="stat">
+          <span id="stat-2-label">每日活动</span>
+          <strong id="stat-2-value">未开启（安全模式）</strong>
+        </div>
+        <div class="stat">
+          <span id="stat-3-label">下次自动开始</span>
+          <strong id="stat-3-value">未设置</strong>
+        </div>
+      </div>
+      <div class="progress" aria-hidden="true"><i id="progress-bar"></i></div>
+      <button id="primary-btn" class="primary">开始今日任务</button>
+      <p id="hint" class="hint"></p>
+      <footer>
+        <button id="open-options" class="link" type="button">设置</button>
+        <button id="open-bing" class="link" type="button">打开 Bing</button>
+        <button id="open-help" class="link" type="button">说明</button>
+      </footer>
+    </section>
+  </main>
+  <script src="shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,134 +1,229 @@
 "use strict";
 
-const ALARM_NAME = "rebang-daily-auto-start";
-const SEARCH_URL = "https://www.bing.com/search?q=Bing+Rewards+Auto+Start&rebang_autostart=1";
-const HOUR_KEY = "Rebang_AutoStartHour";
-const MINUTE_KEY = "Rebang_AutoStartMin";
-const SEARCH_LOCK_KEY = "Rebang_AutoSearchLock";
-const SEARCH_LIMIT_KEY = "Rebang_LimitSearchCount";
+importScripts("shared.js");
 
-function localDateString(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+const A = BingAssistant;
+const KEYS = A.KEYS;
 
-function dailyCountKey(date = new Date()) {
-  return `Rebang_AutoSearchCount_${localDateString(date)}`;
-}
-
-function triggeredKey(date = new Date()) {
-  return `Rebang_AutoStartTriggered_${localDateString(date)}`;
-}
-
-function nextScheduledTime(hour, minute, now = new Date()) {
-  const next = new Date(now);
-  next.setHours(hour, minute, 0, 0);
-  if (next.getTime() <= now.getTime()) {
-    next.setDate(next.getDate() + 1);
-  }
-  return next;
+async function readStore() {
+  return chrome.storage.local.get(null);
 }
 
 async function readSchedule() {
-  const values = await chrome.storage.local.get([HOUR_KEY, MINUTE_KEY]);
-  const hour = Number.parseInt(values[HOUR_KEY], 10);
-  const minute = Number.parseInt(values[MINUTE_KEY], 10);
-  const enabled = Number.isInteger(hour) && hour >= 0 && hour <= 23 &&
-    Number.isInteger(minute) && minute >= 0 && minute <= 59;
-  return { enabled, hour, minute };
+  const values = await chrome.storage.local.get([KEYS.autoStartHour, KEYS.autoStartMin]);
+  return A.parseHourMinute(values[KEYS.autoStartHour], values[KEYS.autoStartMin]);
 }
 
 async function scheduleNextAlarm() {
-  await chrome.alarms.clear(ALARM_NAME);
+  await chrome.alarms.clear(A.ALARM_NAME);
   const schedule = await readSchedule();
   if (!schedule.enabled) return;
-
-  const when = nextScheduledTime(schedule.hour, schedule.minute).getTime();
-  await chrome.alarms.create(ALARM_NAME, { when });
+  const when = A.nextScheduledTime(schedule.hour, schedule.minute).getTime();
+  await chrome.alarms.create(A.ALARM_NAME, { when });
 }
 
 async function openOrWakeSearchTab() {
   const tabs = await chrome.tabs.query({ url: ["*://*.bing.com/search*"] });
   const usableTab = tabs.find((tab) => typeof tab.id === "number");
-
   if (usableTab) {
-    await chrome.tabs.update(usableTab.id, { active: true, url: SEARCH_URL });
+    await chrome.tabs.update(usableTab.id, { active: true, url: A.SEARCH_URL });
     if (typeof usableTab.windowId === "number") {
       await chrome.windows.update(usableTab.windowId, { focused: true });
     }
-    return;
+    return usableTab.id;
   }
-
-  await chrome.tabs.create({ url: SEARCH_URL, active: true });
+  const created = await chrome.tabs.create({ url: A.SEARCH_URL, active: true });
+  return created.id;
 }
 
-async function startDailyRun() {
-  const now = new Date();
-  const todayTriggeredKey = triggeredKey(now);
-  const todayCountKey = dailyCountKey(now);
-  const values = await chrome.storage.local.get([
-    todayTriggeredKey,
-    todayCountKey,
-    SEARCH_LIMIT_KEY
-  ]);
+async function notify(id, message) {
+  const store = await readStore();
+  if (store[KEYS.notifyEnabled] === false) return;
+  try {
+    await chrome.notifications.create(id, {
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title: A.PRODUCT_NAME_ZH,
+      message
+    });
+  } catch (error) {
+    console.warn("[BingAssistant] notification failed", error);
+  }
+}
 
-  const alreadyTriggered = values[todayTriggeredKey] === "true" || values[todayTriggeredKey] === true;
-  const count = Number(values[todayCountKey] ?? 0);
-  const limit = Number(values[SEARCH_LIMIT_KEY] ?? 50);
-  if (alreadyTriggered || count >= limit) return;
+async function updateBadge() {
+  const model = A.buildViewModel(await readStore());
+  let text = "";
+  let color = "#0078D4";
+  if (model.state === "running") {
+    text = String(model.count);
+  } else if (model.state === "complete") {
+    text = "✓";
+    color = "#107C10";
+  } else if (model.state === "failed" || model.state === "logged_out") {
+    text = "!";
+    color = "#D83B01";
+  }
+  await chrome.action.setBadgeBackgroundColor({ color });
+  await chrome.action.setBadgeText({ text });
+}
+
+async function applyDefaultsIfNeeded() {
+  const store = await readStore();
+  const patch = {};
+  if (store[KEYS.limitSearchCount] === undefined) patch[KEYS.limitSearchCount] = A.DEFAULT_SEARCH_LIMIT;
+  if (store[KEYS.maxNoGainLimit] === undefined) patch[KEYS.maxNoGainLimit] = A.DEFAULT_NO_GAIN_LIMIT;
+  if (store[KEYS.dailyTaskMaxRetries] === undefined) patch[KEYS.dailyTaskMaxRetries] = A.DEFAULT_DAILY_RETRIES;
+  if (store[KEYS.enableDailyTasks] === undefined) patch[KEYS.enableDailyTasks] = false;
+  if (store[KEYS.notifyEnabled] === undefined) patch[KEYS.notifyEnabled] = true;
+  if (store[KEYS.loginState] === undefined) patch[KEYS.loginState] = "unknown";
+  if (store[KEYS.productState] === undefined) patch[KEYS.productState] = "ready";
+  if (A.LEGACY_CHANNELS.includes(store[KEYS.selectedChannel])) {
+    patch[KEYS.selectedChannel] = A.WORD_PACK_SHORT;
+  } else if (!store[KEYS.selectedChannel]) {
+    patch[KEYS.selectedChannel] = A.WORD_PACK_SHORT;
+  }
+  if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+}
+
+async function startToday(reason = "manual") {
+  const store = await readStore();
+  if (store[KEYS.riskAccepted] !== true) {
+    return { ok: false, error: "请先确认使用风险" };
+  }
+  const model = A.buildViewModel(store);
+  if (model.count >= model.limit && (!model.dailyEnabled || model.dailyDone)) {
+    await chrome.storage.local.set({ [KEYS.productState]: "complete" });
+    await updateBadge();
+    return { ok: false, error: "今天的任务已经完成" };
+  }
 
   await chrome.storage.local.set({
-    [SEARCH_LOCK_KEY]: "on",
-    Rebang_GlobalMasterTabId: "",
-    Rebang_GlobalMasterStatus: "IDLE",
-    Rebang_GlobalLastRunTime: 0
+    [KEYS.autoSearchLock]: "on",
+    [KEYS.globalMasterTabId]: "",
+    [KEYS.globalMasterStatus]: "IDLE",
+    [KEYS.globalLastRunTime]: 0,
+    [KEYS.consecutiveNoGain]: 0,
+    [KEYS.jumpFailCount]: 0,
+    [KEYS.jumpLastPoints]: -1,
+    [KEYS.rewardsFailCount]: 0,
+    [KEYS.autoSearchLockExpires]: 0,
+    [KEYS.lastPoints]: null,
+    [KEYS.lastError]: "",
+    [KEYS.productState]: "running",
+    [KEYS.runStartedAt]: Date.now(),
+    [KEYS.lastStatusMessage]: reason === "alarm" ? "已到设定时间，正在开始今天的任务" : "正在开始今天的任务"
   });
 
-  try {
-    await openOrWakeSearchTab();
-    await chrome.storage.local.set({ [todayTriggeredKey]: "true" });
-  } catch (error) {
-    await chrome.storage.local.set({ [SEARCH_LOCK_KEY]: "off" });
-    throw error;
+  await openOrWakeSearchTab();
+  await updateBadge();
+  return { ok: true };
+}
+
+async function stopToday(message = "已停止") {
+  await chrome.storage.local.set({
+    [KEYS.autoSearchLock]: "off",
+    [KEYS.productState]: "ready",
+    [KEYS.lastStatusMessage]: message
+  });
+  await updateBadge();
+  return { ok: true };
+}
+
+async function startDailyRun(reason = "alarm") {
+  const now = new Date();
+  const store = await chrome.storage.local.get([
+    A.triggeredKey(now),
+    A.dailyCountKey(now),
+    KEYS.limitSearchCount,
+    KEYS.riskAccepted
+  ]);
+  if (store[KEYS.riskAccepted] !== true) return;
+  const alreadyTriggered = store[A.triggeredKey(now)] === "true" || store[A.triggeredKey(now)] === true;
+  const count = Number(store[A.dailyCountKey(now)] ?? 0);
+  const limit = Number(store[KEYS.limitSearchCount] ?? A.DEFAULT_SEARCH_LIMIT);
+  if (alreadyTriggered || count >= limit) return;
+
+  const result = await startToday(reason);
+  if (result.ok) {
+    await chrome.storage.local.set({ [A.triggeredKey(now)]: "true" });
   }
 }
 
 async function catchUpIfNeeded() {
   const schedule = await readSchedule();
   if (!schedule.enabled) return;
-
   const now = new Date();
   const scheduledToday = new Date(now);
   scheduledToday.setHours(schedule.hour, schedule.minute, 0, 0);
   if (now.getTime() >= scheduledToday.getTime()) {
-    await startDailyRun();
+    await startDailyRun("catchup");
   }
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  void scheduleNextAlarm();
-  void catchUpIfNeeded();
+  void applyDefaultsIfNeeded().then(scheduleNextAlarm).then(updateBadge);
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void scheduleNextAlarm();
-  void catchUpIfNeeded();
+  void applyDefaultsIfNeeded().then(scheduleNextAlarm).then(catchUpIfNeeded).then(updateBadge);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== ALARM_NAME) return;
-  void startDailyRun().finally(scheduleNextAlarm);
+  if (alarm.name !== A.ALARM_NAME) return;
+  void startDailyRun("alarm").finally(scheduleNextAlarm);
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
-  if (changes[HOUR_KEY] || changes[MINUTE_KEY]) {
-    void scheduleNextAlarm().then(catchUpIfNeeded);
+  if (changes[KEYS.autoStartHour] || changes[KEYS.autoStartMin]) {
+    void scheduleNextAlarm();
   }
+  void updateBadge();
 });
 
-chrome.action.onClicked.addListener(() => {
-  void openOrWakeSearchTab();
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const type = message && message.type;
+  if (type === "ACCEPT_RISK") {
+    chrome.storage.local.set({ [KEYS.riskAccepted]: true }).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (type === "OPEN_BING") {
+    openOrWakeSearchTab().then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (type === "START_TODAY") {
+    startToday("manual").then(sendResponse);
+    return true;
+  }
+  if (type === "STOP_TODAY") {
+    stopToday("已停止").then(sendResponse);
+    return true;
+  }
+  if (type === "RUN_FINISHED") {
+    const reason = message.reason || "stopped";
+    const count = Number(message.count || 0);
+    const limit = Number(message.limit || A.DEFAULT_SEARCH_LIMIT);
+    const startedAt = Number(message.startedAt || 0);
+    const durationMs = startedAt > 0 ? Date.now() - startedAt : 0;
+    const summary = { reason, count, limit, durationMs, at: Date.now() };
+    const patch = {
+      [KEYS.lastRunSummary]: summary,
+      [KEYS.lastStatusMessage]: message.message || "",
+      [KEYS.autoSearchLock]: "off"
+    };
+    if (reason === "complete") {
+      patch[KEYS.productState] = "complete";
+      void notify("bing-assistant-complete", `今日电脑搜索 ${count}/${limit}，用时 ${A.formatDuration(durationMs)}`);
+    } else if (reason === "failed") {
+      patch[KEYS.productState] = "failed";
+      patch[KEYS.lastError] = message.message || "连续多次没有积分，已停止";
+      void notify("bing-assistant-failed", message.message || "连续多次没有积分，已停止，可能已达上限或需要登录");
+    } else {
+      patch[KEYS.productState] = "ready";
+    }
+    chrome.storage.local.set(patch).then(updateBadge).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  return false;
 });
