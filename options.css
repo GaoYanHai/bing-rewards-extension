@@ -65,3 +65,72 @@ input[type="number"], input[type="time"], select {
 .help, li { color: var(--muted); font-size: 13px; }
 ul { margin: 0; padding-left: 18px; }
 .risk p { margin: 0; color: var(--muted); }
+
+textarea, input[type="text"] {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+textarea { resize: vertical; }
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+.toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 12px;
+}
+button {
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  padding: 0 12px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.chip button {
+  height: auto;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+}
+.log-list {
+  max-height: 240px;
+  overflow: auto;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.danger summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.danger .help { margin: 0 0 12px; }

@@ -27,14 +27,22 @@
       </label>
       <p id="next-run" class="help">下次启动：未设置</p>
       <label class="row">
+        <span>今日目标</span>
+        <select id="today-goal">
+          <option value="search_only">只搜满（安全模式）</option>
+          <option value="search_safe">搜满 + 安全任务</option>
+          <option value="try_all">尽量全做</option>
+        </select>
+      </label>
+      <p class="help">默认只做电脑搜索。安全任务只自动打开即可得分的探索活动，测验和投票会提醒你自己点。</p>
+      <label class="row">
         <span>电脑搜索目标次数</span>
         <input type="number" id="search-limit" min="1" max="150" step="1">
       </label>
       <label class="row">
-        <span>包含每日活动</span>
-        <input type="checkbox" id="daily-tasks">
+        <span>移动搜索</span>
+        <strong id="mobile-quota">未启用</strong>
       </label>
-      <p class="help">默认关闭，也就是安全模式：只做搜索，不点击 Rewards 活动。</p>
       <label class="row">
         <span>完成后通知我</span>
         <input type="checkbox" id="notify-enabled" checked>
@@ -51,14 +59,42 @@
     </section>
 
     <section>
-      <h2>高级设置</h2>
+      <h2>每日搜索词</h2>
       <label class="row">
-        <span>搜索词库</span>
+        <span>词库</span>
         <select id="word-pack">
           <option value="日常短词">日常短词（推荐）</option>
           <option value="生活长尾">生活长尾</option>
+          <option value="自定义">自定义</option>
         </select>
       </label>
+      <label class="stack">
+        <span>自定义词，每行一个，也可用逗号分隔</span>
+        <textarea id="custom-keywords" rows="6" placeholder="天气预报&#10;今日新闻&#10;家常菜谱"></textarea>
+      </label>
+      <div class="toolbar">
+        <button id="save-custom" type="button">保存自定义词</button>
+        <button id="refresh-keywords" type="button">换一批</button>
+      </div>
+      <p id="keyword-note" class="help">今日词库还没生成。打开 Bing 后会按本地词包生成。</p>
+      <div id="today-words" class="chips"></div>
+      <label class="stack">
+        <span>拉黑词，今天不会再搜</span>
+        <div class="inline">
+          <input type="text" id="block-word" placeholder="输入要拉黑的词">
+          <button id="block-word-btn" type="button">拉黑</button>
+        </div>
+      </label>
+      <div id="blocked-words" class="chips"></div>
+    </section>
+
+    <section>
+      <h2>今日日志</h2>
+      <div id="log-list" class="log-list">还没有今天的日志。</div>
+    </section>
+
+    <section>
+      <h2>高级设置</h2>
       <label class="row">
         <span>连续没有积分时停止</span>
         <input type="number" id="no-gain-limit" min="3" max="30" step="1">
@@ -67,7 +103,38 @@
         <span>每日活动重试次数</span>
         <input type="number" id="daily-retries" min="1" max="10" step="1">
       </label>
+      <label class="row">
+        <span>允许错过时间后补做</span>
+        <input type="checkbox" id="catchup-enabled" checked>
+      </label>
+      <label class="row">
+        <span>补做前先问我一声</span>
+        <input type="checkbox" id="catchup-ask">
+      </label>
       <p class="help">搜索间隔固定为 8-14 秒，用来更接近常规搜索，不建议改得更短。</p>
+    </section>
+
+    <section class="danger">
+      <details>
+        <summary>危险设置</summary>
+        <label class="row">
+          <span>启用移动搜索配额展示</span>
+          <input type="checkbox" id="mobile-enabled">
+        </label>
+        <p class="help">1.2 只展示配额，不会改 User-Agent，也不会真的做移动搜索。</p>
+        <label class="row">
+          <span>自动处理测验</span>
+          <input type="checkbox" id="quiz-assist" disabled>
+        </label>
+        <p class="help">1.2 不会自动作答测验，只会提示你点一下。</p>
+        <label class="stack">
+          <span>自定义 User-Agent</span>
+          <input type="text" id="custom-ua" disabled placeholder="暂不支持">
+        </label>
+        <div class="toolbar">
+          <button id="export-logs" type="button">导出日志</button>
+        </div>
+      </details>
     </section>
 
     <section class="risk">
