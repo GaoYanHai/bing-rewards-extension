@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bing 积分助手设置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <header>
+      <img src="icons/icon48.png" alt="">
+      <div>
+        <h1>Bing 积分助手</h1>
+        <p>把每天要做的搜索放进后台，把今日状态放在图标上。</p>
+      </div>
+    </header>
+
+    <section>
+      <h2>基础设置</h2>
+      <label class="row">
+        <span>每天自动开始</span>
+        <span class="inline">
+          <input type="checkbox" id="schedule-enabled">
+          <input type="time" id="schedule-time">
+        </span>
+      </label>
+      <p id="next-run" class="help">下次启动：未设置</p>
+      <label class="row">
+        <span>电脑搜索目标次数</span>
+        <input type="number" id="search-limit" min="1" max="150" step="1">
+      </label>
+      <label class="row">
+        <span>包含每日活动</span>
+        <input type="checkbox" id="daily-tasks">
+      </label>
+      <p class="help">默认关闭，也就是安全模式：只做搜索，不点击 Rewards 活动。</p>
+      <label class="row">
+        <span>完成后通知我</span>
+        <input type="checkbox" id="notify-enabled" checked>
+      </label>
+    </section>
+
+    <section>
+      <h2>定时说明</h2>
+      <ul>
+        <li>浏览器开着，到点会启动。</li>
+        <li>当时没开，下次打开浏览器会补做今天。</li>
+        <li>电脑关机或睡眠时，无法自己开机。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>高级设置</h2>
+      <label class="row">
+        <span>搜索词库</span>
+        <select id="word-pack">
+          <option value="日常短词">日常短词（推荐）</option>
+          <option value="生活长尾">生活长尾</option>
+        </select>
+      </label>
+      <label class="row">
+        <span>连续没有积分时停止</span>
+        <input type="number" id="no-gain-limit" min="3" max="30" step="1">
+      </label>
+      <label class="row">
+        <span>每日活动重试次数</span>
+        <input type="number" id="daily-retries" min="1" max="10" step="1">
+      </label>
+      <p class="help">搜索间隔固定为 8-14 秒，用来更接近常规搜索，不建议改得更短。</p>
+    </section>
+
+    <section class="risk">
+      <h2>风险说明</h2>
+      <p>自动搜索和自动点击可能不符合 Microsoft Rewards 使用规则，存在积分无效或账号受限的风险。请自行判断是否使用。</p>
+    </section>
+  </main>
+  <script src="shared.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

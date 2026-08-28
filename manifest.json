@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Bing Rewards 积分助手",
-  "version": "1.0.0",
-  "description": "在 Bing 页面提供积分任务工具，并在浏览器运行时按设定时间自动启动。",
+  "name": "Bing 积分助手",
+  "version": "1.1.0",
+  "description": "帮你在浏览器开着的时候完成今天的 Bing 搜索，并随时看清进度。",
   "permissions": [
     "alarms",
     "storage",
-    "tabs"
+    "tabs",
+    "notifications"
   ],
   "host_permissions": [
     "https://*.bing.com/*"
@@ -15,8 +16,21 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "打开 Bing Rewards 积分助手"
+    "default_title": "Bing 积分助手",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
   },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "options_page": "options.html",
   "content_scripts": [
     {
       "matches": [
@@ -25,6 +39,7 @@
       ],
       "js": [
         "vendor/jquery-3.7.1.min.js",
+        "shared.js",
         "content.js"
       ],
       "run_at": "document_idle"

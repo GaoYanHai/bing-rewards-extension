@@ -9,6 +9,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         if (typeof change.newValue === "undefined") delete rebangExtensionStore[key];
         else rebangExtensionStore[key] = change.newValue;
     });
+    const shouldRefreshBar = Object.keys(changes).some((key) =>
+        key === BingAssistant.KEYS.autoSearchLock ||
+        key === BingAssistant.KEYS.limitSearchCount ||
+        key === BingAssistant.KEYS.lastKeyword ||
+        key === BingAssistant.KEYS.productState ||
+        key.indexOf("Rebang_AutoSearchCount_") === 0
+    );
+    if (shouldRefreshBar && typeof updateMiniBar === "function") updateMiniBar();
 });
 
 function GM_getValue(key, defaultValue) {
@@ -30,24 +38,6 @@ function GM_addStyle(cssText) {
     (document.head || document.documentElement).appendChild(style);
     return style;
 }
-
-// ==UserScript==
-// @name         微软Bing 必应积分自动脚本
-// @version      2025.12.25.3
-// @description  必应 Bing 搜索添加今日热榜，悬浮窗模式，智能检测积分变化，自动换榜单，支持每日任务自动点击，延迟刷新确保任务完成，防死循环，重试逻辑改为基于积分变化。修复跨天不换榜问题。
-// @author       8969
-// @match        *://*.bing.com/search*
-// @match        https://rewards.bing.com/*
-// @icon         https://www.google.com/s2/favicons?sz=64&domain=bing.com
-// @require      https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js#sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==
-// @license      GPL-3.0-or-later; https://www.gnu.org/licenses/gpl-3.0.html
-// @antifeature referral-link This script includes a refer link.
-// @grant        unsafeWindow
-// @grant        GM_getResourceText
-// @grant        GM_addStyle
-// @grant        GM_setValue
-// @grant        GM_getValue
-// ==/UserScript==
 
 // 测试模式开关
 // 1: 开启测试模式。点击"开始"时，强制重置今日所有状态（用于调试）。
@@ -237,6 +227,21 @@ GM_addStyle(`
     #ex-user-msg { font-size: 12px; color: #d9534f; margin-top: 5px; display: block; min-height: 18px; }
     .checkbox-wrapper { display: flex; align-items: center; gap: 4px; }
     input[type=checkbox] { accent-color: #0078d4; }
+    #rebang-widget { width: min(420px, calc(100vw - 24px)); }
+    #rebang-header { min-height: 48px; padding: 8px 12px; gap: 8px; flex-wrap: nowrap; }
+    #rebang-title { font-size: 13px; }
+    #rebang-mini-progress { margin-left: auto; font-size: 12px; color: #0078d4; font-weight: 600; white-space: nowrap; }
+    #rebang-mini-current { font-size: 12px; color: #666; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #888; display: inline-block; flex-shrink: 0; }
+    .status-dot.running { background: #107c10; }
+    #ext-autosearch-lock { height: 32px; padding: 0 12px; }
+    .rebang-pack-note { font-size: 12px; color: #666; margin: 8px 0; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .rebang-log { font-size: 12px; color: #666; padding: 2px 0; }
+    #ex-user-msg { color: #605e5c; }
+    .b_dark #rebang-mini-current, .b_dark .rebang-pack-note, .b_dark .rebang-log, .b_dark #ex-user-msg { color: #bbb; }
+    @media (prefers-color-scheme: dark) {
+        #rebang-mini-current, .rebang-pack-note, .rebang-log, #ex-user-msg { color: #bbb; }
+    }
 `);
 
 // 修复：不使用 this（严格模式下 this 为 undefined 会崩溃）
@@ -340,16 +345,14 @@ function syncTabStatus() {
     if ($("#rebang-widget").length > 0) {
         $("#rebang-widget").show();
         if (isMaster) {
-            const title = mySwitchState === "on"
-                ? "🔥 必应积分助手 (主控执行)"
-                : "🔥 必应积分助手 (待机)";
+            const title = mySwitchState === "on" ? "Bing 积分助手" : "Bing 积分助手";
             $("#rebang-title").text(title);
             $("#rebang-widget").css("opacity", "1");
         } else {
-            let statusText = isMasterDead ? "主控无响应" : (masterStatus === "RUNNING" ? "主控忙碌中" : "主控空闲");
-            $("#rebang-title").text(`💤 等待接力 (${statusText})`);
+            $("#rebang-title").text("其他标签页正在运行");
             $("#rebang-widget").css("opacity", "0.7");
         }
+        updateMiniBar();
     }
 
     return isMaster;
@@ -399,6 +402,16 @@ const LOCAL_KEYWORD_POOL = [
     "宇宙探索发现","深海生物奥秘","恐龙化石研究","气候变化影响","新能源技术"
 ];
 
+const SHORT_KEYWORD_POOL = [
+    "天气预报","今日新闻","翻译","地图","汇率查询","股票行情","快递查询","家常菜谱",
+    "电影票","火车票","今日油价","手机推荐","笔记本电脑","无线耳机","数码相机",
+    "健身计划","减肥方法","护肤步骤","穿搭灵感","旅游攻略","酒店预订","机票查询",
+    "世界杯","足球比分","NBA赛况","编程入门","英语单词","历史故事","物理科普",
+    "基金入门","保险知识","理财方法","咖啡做法","新能源汽车","驾照考试","宠物护理",
+    "小说推荐","音乐排行","手机游戏","动漫推荐","健康饮食","地方小吃","宇宙探索",
+    "智能家居","机械键盘","相机镜头","二手车","自驾游","心理学","地理知识"
+];
+
 // 基于日期+频道名的伪随机数生成器（确保每天、每个榜单生成不同的排列）
 function dailyRandomSeed(channelName) {
     let dateStr = getLocalDateStr() + "|" + (channelName || "");
@@ -424,9 +437,13 @@ function seededShuffle(arr, seed) {
 }
 
 // 生成每日关键词列表（每天、每个榜单顺序不同）
+function getKeywordPool(packName) {
+    return packName === BingAssistant.WORD_PACK_LONG ? LOCAL_KEYWORD_POOL : SHORT_KEYWORD_POOL;
+}
+
 function generateDailyKeywords(count, channelName) {
     let seed = dailyRandomSeed(channelName);
-    let shuffled = seededShuffle(LOCAL_KEYWORD_POOL, seed);
+    let shuffled = seededShuffle(getKeywordPool(channelName), seed);
     // 如果需要的数量超过词库大小，循环扩展
     let result = [];
     while (result.length < count) {
@@ -435,7 +452,7 @@ function generateDailyKeywords(count, channelName) {
         }
         // 换个种子再洗一次，避免重复
         seed = seed + 1;
-        shuffled = seededShuffle(LOCAL_KEYWORD_POOL, seed);
+        shuffled = seededShuffle(getKeywordPool(channelName), seed);
     }
     return result;
 }
@@ -617,46 +634,34 @@ function getBingPoints() {
     }
 }
 
-function stopAutoSearch(msg) {
+function stopAutoSearch(msg, reason) {
     setVal(autoSearchLockKey, "off");
     $("#ext-autosearch-lock").text("开始").removeClass("stop");
-
-    // 【新增】更新状态指示器为停止状态
     $("#ext-status-indicator").html('● <span class="status-idle">已停止</span>');
-    $("#ext-current-keyword").text('-');
-
-    if(msg) showUserMessage(msg);
+    $("#ext-current-keyword").text("-");
+    if (msg) showUserMessage(msg);
+    updateMiniBar();
+    chrome.runtime.sendMessage({
+        type: "RUN_FINISHED",
+        reason: reason || "stopped",
+        message: msg || "",
+        count: Number(getVal(getAutoSearchCountKey(), 0)),
+        limit: Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT)),
+        startedAt: Number(getVal(BingAssistant.KEYS.runStartedAt, 0))
+    }).catch(() => {});
 }
 
 // 【关键逻辑】每天随机切换榜单并清理旧缓存
 // 确保每天第一次运行时，或者挂机跨天时，自动换一个新榜单并获取最新数据
 function checkAndRandomizeDailyChannel(channelList) {
     if (!channelList || channelList.length === 0) return;
-
-    const todayStr = getLocalDateStr(); // 获取本地日期
+    const todayStr = getLocalDateStr();
     const lastSelectDate = localStorage.getItem(`${prefix}LastAutoSelectDate`);
-
-    // 如果上次选择日期不是今天
     if (lastSelectDate !== todayStr) {
-        console.log(`[Rebang] 检测到新的一天 (${todayStr})，正在随机选择榜单...`);
-
-        // 随机选一个榜单
-        const randomIndex = Math.floor(Math.random() * channelList.length);
-        const newChannel = channelList[randomIndex];
-
-        // 更新状态
-        localStorage.setItem(selectedChannelKey, newChannel);
         localStorage.setItem(currentKeywordIndexKey, 0);
         localStorage.setItem(`${prefix}LastAutoSelectDate`, todayStr);
-
-        // 强制清除 SessionStorage 中的旧缓存，迫使 initKeywords 重新请求最新数据
-        sessionStorage.removeItem(`${prefix}${newChannel}`);
-
-        // 更新 UI
-        $("#ext-channels").val(newChannel);
-        showUserMessage(`新的一天，已随机切换至: ${newChannel}`);
-
-        // 重新初始化
+        sessionStorage.removeItem(getCurrentChannelKeywordsCacheKey());
+        showUserMessage("新的一天，已生成今日搜索词");
         initKeywords();
     }
 }
@@ -689,9 +694,9 @@ function switchToNextChannel() {
     let nextChannel = channelList[nextIndex];
 
     if (isWrapAround) {
-        showUserMessage(`所有榜单已搜完一轮，从头开始: ${nextChannel}...`);
+        showUserMessage("这批搜索词用完了，正在换一批");
     } else {
-        showUserMessage(`本榜单已搜完，切换至: ${nextChannel}...`);
+        showUserMessage("这批搜索词用完了，正在换一批");
     }
 
     // 更新状态
@@ -720,11 +725,88 @@ function getCurrentChannelKeywordsCacheKey() {
 }
 
 function getCurrentChannel() {
-  return localStorage.getItem(selectedChannelKey) ?? "微博";
+  let value = getVal(selectedChannelKey, localStorage.getItem(selectedChannelKey) || BingAssistant.WORD_PACK_SHORT);
+  if (!value || BingAssistant.LEGACY_CHANNELS.includes(value)) {
+    value = BingAssistant.WORD_PACK_SHORT;
+  }
+  value = BingAssistant.normalizeWordPack(value);
+  if (getVal(selectedChannelKey, "") !== value) setVal(selectedChannelKey, value);
+  if (localStorage.getItem(selectedChannelKey) !== value) localStorage.setItem(selectedChannelKey, value);
+  return value;
+}
+
+function detectLoginState() {
+  const name = ($("#id_n").text() || "").trim();
+  if (name) return "in";
+  if ($("#id_s").length > 0) return "out";
+  if (getBingPoints() !== null) return "in";
+  return "unknown";
+}
+
+let lastPublishedState = "";
+function publishAssistantState() {
+  const points = getBingPoints();
+  const login = detectLoginState();
+  const keyword = ($("#ext-current-keyword").text() || "").replace(/^-$/, "").trim();
+  const snapshot = JSON.stringify({
+    points,
+    login,
+    keyword,
+    lock: getVal(autoSearchLockKey, "off"),
+    msg: ($("#ex-user-msg").text() || "").trim()
+  });
+  if (snapshot === lastPublishedState) return;
+  lastPublishedState = snapshot;
+  const payload = {
+    [BingAssistant.KEYS.loginState]: login,
+    [BingAssistant.KEYS.lastKeyword]: keyword,
+    [BingAssistant.KEYS.lastStatusMessage]: ($("#ex-user-msg").text() || "").trim()
+  };
+  if (points !== null) payload[BingAssistant.KEYS.pointsBalance] = points;
+  chrome.storage.local.set(payload).catch(() => {});
+}
+
+function pushRecentLog(msg) {
+  let logs = getVal(BingAssistant.KEYS.recentLogs, []);
+  if (!Array.isArray(logs)) logs = [];
+  logs.unshift({ t: Date.now(), text: String(msg) });
+  setVal(BingAssistant.KEYS.recentLogs, logs.slice(0, 5));
+  renderRecentLogs();
+}
+
+function renderRecentLogs() {
+  const box = $("#ext-recent-logs");
+  if (!box.length) return;
+  let logs = getVal(BingAssistant.KEYS.recentLogs, []);
+  if (!Array.isArray(logs)) logs = [];
+  box.empty();
+  logs.forEach((item) => {
+    box.append(`<div class="rebang-log">${escapeHtml(item.text || "")}</div>`);
+  });
+}
+
+function updateMiniBar() {
+  const count = Number(getVal(getAutoSearchCountKey(), 0));
+  const limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+  const running = getVal(autoSearchLockKey, "off") === "on";
+  $("#rebang-mini-progress").text(`电脑搜索 ${count}/${limit}`);
+  $("#ext-current-count").text(count);
+  if (running) {
+    $("#ext-autosearch-lock").text("停止").addClass("stop");
+    $("#rebang-dot").addClass("running");
+  } else {
+    $("#ext-autosearch-lock").text("开始").removeClass("stop");
+    $("#rebang-dot").removeClass("running");
+  }
+  const keyword = ($("#ext-current-keyword").text() || "").trim();
+  $("#rebang-mini-current").text(running && keyword && keyword !== "-" ? keyword : "");
+  publishAssistantState();
 }
 
 function showUserMessage(msg) {
   $("#ex-user-msg").text(msg);
+  pushRecentLog(msg);
+  publishAssistantState();
 }
 
 function doSearch(keyword) {
@@ -792,15 +874,19 @@ function handleRewardsPage() {
     }
 
     // 脚本未开启或未启用每日任务时退出
-    if (isLocked !== "on") { showUserMessage("脚本未开启"); return; }
-    if (getVal(enableDailyTasksKey, false) !== true) { showUserMessage("未启用每日任务，返回..."); return; }
+    if (isLocked !== "on") return;
+    if (getVal(enableDailyTasksKey, false) !== true) {
+        showUserMessage("安全模式已开，正在返回搜索");
+        setTimeout(() => { window.location.href = BingAssistant.SEARCH_URL; }, 1000);
+        return;
+    }
 
     // 2. 冷却时间检查
     let lastClickTime = Number(getVal(rewardsClickTimeKey, 0));
     let now = new Date().getTime();
     if (now - lastClickTime < 5000) {
         let left = Math.ceil((5000 - (now - lastClickTime)) / 1000);
-        showUserMessage(`等待验证... ${left}s`);
+        showUserMessage(`正在确认刚才的活动是否加分（还剩 ${left} 秒）`);
         // 修复：不再强制刷新，让时间自然耗尽后由下一次轮询处理
         return;
     }
@@ -813,7 +899,7 @@ function handleRewardsPage() {
         $cards = $(".c-card-content");
     }
 
-    if ($cards.length === 0) { showUserMessage("未找到任务卡片或加载中..."); return; }
+    if ($cards.length === 0) { showUserMessage("正在读取每日活动..."); return; }
 
     // 状态准备
     let rewardsLastPoints = Number(getVal(rewardsLastPointsKey, -1));
@@ -891,7 +977,7 @@ function handleRewardsPage() {
 
     // 熔断：拉黑 (次数过多则拉黑)
     if (hasPending && targetLink && failCount >= maxRetries) {
-        showUserMessage(`任务[${truncateText(targetName,6)}]重试超限，拉黑...`);
+        showUserMessage(`“${truncateText(targetName,8)}”多次没有加分，已跳过`);
         addTaskToBlacklist(targetUrl);
         setVal(rewardsFailCountKey, 0);
         setTimeout(() => { location.reload(); }, 1500);
@@ -904,7 +990,7 @@ function handleRewardsPage() {
         sessionStorage.removeItem("Rebang_SessionClicked");
         setVal(lastPointsKey, null);
 
-        showUserMessage("任务检测完毕！返回搜索...");
+        showUserMessage("每日活动已处理完，正在返回搜索");
         setTimeout(() => {
              window.location.href = "https://www.bing.com/search?q=Bing+Rewards+Done";
         }, 1500);
@@ -926,7 +1012,7 @@ function handleRewardsPage() {
             setVal(rewardsFailCountKey, 0);
         }
 
-        showUserMessage(`点击: ${truncateText(targetName, 8)}`);
+        showUserMessage(`正在打开活动：${truncateText(targetName, 10)}`);
 
         if (currentPoints !== null) setVal(rewardsLastPointsKey, currentPoints);
         setVal(rewardsClickTimeKey, now);
@@ -991,7 +1077,7 @@ function doAutoSearch() {
       // 任务页跳转冷却 (60秒)
       if (nowTime - lastRedirect < 60 * 1000) {
           let waitSec = Math.ceil((60000 - (nowTime - lastRedirect)) / 1000);
-          showUserMessage(`等待任务页冷却... ${waitSec}s`);
+          showUserMessage(`正在等待每日活动页面准备好（还剩 ${waitSec} 秒）`);
           return;
       }
 
@@ -1019,12 +1105,12 @@ function doAutoSearch() {
 
       // 跳转失败过多，放弃任务
       if (jumpFailCount > maxRetries) {
-          showUserMessage(`无分跳转(${jumpFailCount}次)超限，跳过`);
+          showUserMessage("每日活动多次没有加分，已跳过，继续搜索");
           setVal(getDailyTasksDoneKey(), true);
           return;
       }
 
-      showUserMessage(`前往任务页 (无分次数:${jumpFailCount})...`);
+      showUserMessage("正在打开每日活动页面");
 
       if (currentPoints !== null) setVal(jumpLastPointsKey, currentPoints);
       setVal(getDailyTaskRedirectTimeKey(), nowTime);
@@ -1052,7 +1138,7 @@ function doAutoSearch() {
 
   if (jobLockExpires > now) {
       let secondsLeft = Math.ceil((jobLockExpires - now) / 1000);
-      showUserMessage(`等待冷却 ${secondsLeft}s | 当前积分: ${currentPoints}`);
+      showUserMessage(`正在模拟常规搜索，间隔 8-14 秒（还剩 ${secondsLeft} 秒）`);
       return;
   }
 
@@ -1083,7 +1169,7 @@ function doAutoSearch() {
           // 连续无积分保护逻辑
           if (consecutiveNoGain >= maxNoGainLimit) {
               // 直接停止，不再尝试新建页面
-              stopAutoSearch(`已连续 ${maxNoGainLimit} 次无积分，判定为今日达赫或IP限制，停止运行。`);
+              stopAutoSearch(`连续 ${maxNoGainLimit} 次搜索没有加分，今天可能已经满额，或账号被限制。已停止。`, "failed");
               return;
           }
       }
@@ -1092,7 +1178,7 @@ function doAutoSearch() {
   $("#ext-current-count").text(currentSearchCount);
 
   // 【新增】更新进度条和状态指示器
-  let limitSearchCount = Number(getVal(limitSearchCountKey, 50));
+  let limitSearchCount = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
   let progressPercent = Math.min((currentSearchCount / limitSearchCount) * 100, 100);
   $("#search-progress-bar").css("width", progressPercent + "%");
 
@@ -1106,7 +1192,7 @@ function doAutoSearch() {
       // 【新增】: 搜完了，先把全局状态设为 IDLE，让别的页面赶紧接手
       setVal(globalMasterStatusKey, "IDLE");
 
-      stopAutoSearch("今日积分任务已达标！");
+      stopAutoSearch("今天的电脑搜索已完成", "complete");
       return;
   }
 
@@ -1131,8 +1217,10 @@ function doAutoSearch() {
     currentKeywordIndex++;
     localStorage.setItem(currentKeywordIndexKey, currentKeywordIndex);
 
-    let msg = isPointsIncreased ? `积分+${currentPoints - Number(lastPoints)}! ` : (lastPoints !== null ? `无分(${consecutiveNoGain}/${maxNoGainLimit}). ` : "");
-    showUserMessage(`${msg}搜索: ${truncateText(keywords[currentKeywordIndex - 1].title, 15)}`);
+    let msg = isPointsIncreased
+        ? `积分 +${currentPoints - Number(lastPoints)}。`
+        : (lastPoints !== null ? `这次没有加分（${consecutiveNoGain}/${maxNoGainLimit}）。` : "");
+    showUserMessage(`${msg}正在搜索：${truncateText(keywords[currentKeywordIndex - 1].title, 15)}`);
 
     // 立即更新关键词列表的高亮位置（页面跳转前用户就能看到变化）
     renderKeywords(keywords);
@@ -1140,6 +1228,7 @@ function doAutoSearch() {
     // 【新增】更新当前关键词显示
     let currentKw = truncateText(keywords[currentKeywordIndex - 1].title, 8);
     $("#ext-current-keyword").text(currentKw);
+    updateMiniBar();
 
     doSearch(keywords[currentKeywordIndex - 1].title);
   } else {
@@ -1161,7 +1250,7 @@ function initChannels(channels, selectedChannel) {
     $("#ext-channels").append(opt);
   });
   if (localStorage.getItem(selectedChannelKey) == null) {
-    localStorage.setItem(selectedChannelKey, "微博");
+    localStorage.setItem(selectedChannelKey, BingAssistant.WORD_PACK_SHORT);
   }
   initKeywords();
 }
@@ -1176,11 +1265,11 @@ function initKeywords() {
     renderKeywords(keywords);
   } else {
     // 本地生成关键词（每天自动换序，无需网络请求）
-    var limit = Number(getVal(limitSearchCountKey, 50));
-    keywords = generateDailyKeywords(limit + 10, getCurrentChannel()); // 多生成10个备用
+    var limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+    keywords = generateDailyKeywords(limit + 10, getCurrentChannel());
     sessionStorage.setItem(cacheKey, JSON.stringify(keywords));
     renderKeywords(keywords);
-    showUserMessage(`已生成 ${keywords.length} 个每日关键词`);
+    showUserMessage("今日词库已生成 · 基于本地词包 · 未使用热榜");
     console.log(`[Rebang] 本地生成 ${keywords.length} 个关键词 (日期:${getLocalDateStr()})`);
   }
 }
@@ -1204,8 +1293,7 @@ function renderKeywords(keywords) {
     }
     $("#ext-keywords-list").append(linkHtml);
   });
-  // [作者推广链接] 已在脚本头部 @antifeature 中声明
-  $("#ext-keywords-list").append(`<a target='_blank' class='keyword-link' style='color:#0078d4;margin-top:5px;' href='https://rewards.bing.com/welcome?rh=4F42E699&ref=rafsrchae&form=ML2XE3&OCID=ML2XE3&PUBL=RewardsDO&CREA=ML2XE3'>👉 Rewards 赚积分 👈</a>`);
+
 
   // 【新增】自动滚动到当前高亮的关键词位置，显示在中间
   let $currentItem = $("#ext-keywords-list .keyword-link-current");
@@ -1241,12 +1329,33 @@ function renderKeywords(keywords) {
 // 恢复悬浮窗位置
 function restoreWidgetPosition() {
     const pos = JSON.parse(localStorage.getItem(widgetPosKey));
-    if (pos) { $("#rebang-widget").css({ top: pos.top, left: pos.left, right: 'auto', bottom: 'auto' }); }
-    else { $("#rebang-widget").css({ top: '100px', right: '20px' }); }
+    if (pos) { $("#rebang-widget").css({ top: pos.top, left: pos.left, right: "auto", bottom: "auto" }); }
+    else { $("#rebang-widget").css({ top: "24px", right: "20px" }); }
 
-    const isMinimized = localStorage.getItem(widgetStateKey) === 'true';
+    if (localStorage.getItem("Rebang_MiniBarMigrated") !== "1") {
+        localStorage.setItem(widgetStateKey, "true");
+        localStorage.setItem("Rebang_MiniBarMigrated", "1");
+    }
+    const saved = localStorage.getItem(widgetStateKey);
+    const isMinimized = saved === null ? true : saved === "true";
     if (isMinimized) { $("#rebang-body").addClass("minimized"); $("#rebang-toggle-icon").text("+"); }
     else { $("#rebang-toggle-icon").text("−"); }
+}
+
+function bindMiniBarToggle() {
+    $("#rebang-toggle-icon").off("click.rebang").on("click.rebang", function() {
+        const body = $("#rebang-body");
+        if (body.hasClass("minimized")) {
+            body.removeClass("minimized");
+            $(this).text("−");
+            localStorage.setItem(widgetStateKey, "false");
+            renderRecentLogs();
+        } else {
+            body.addClass("minimized");
+            $(this).text("+");
+            localStorage.setItem(widgetStateKey, "true");
+        }
+    });
 }
 
 // 拖拽功能实现
@@ -1277,8 +1386,6 @@ function makeDraggable(elementId, handleId) {
 
 // 定时检查是否需要自动开始 (优化版：包含跨天自动刷新)
 function checkAutoStart() {
-    // === 跨天检测 ===
-    // 比较当前日期与持久存储的上次检查日期，跨天则刷新页面唤醒脚本
     let currentDate = getLocalDateStr();
     let lastCheckDate = GM_getValue("Rebang_LastCheckDate", currentDate);
     if (currentDate !== lastCheckDate) {
@@ -1287,31 +1394,22 @@ function checkAutoStart() {
         location.reload();
         return;
     }
-    // ========================
 
-    // 1. 优先检查是否跨天（修复挂机不刷新页面导致不换榜的问题）
     let channelList = sessionStorage.getItem(channelListKey);
     if (channelList) {
         checkAndRandomizeDailyChannel(JSON.parse(channelList));
     }
 
-    // 2. 检查定时启动逻辑
     let startHourStr = getVal(autoStartHourKey, "-1");
     let startMinStr = getVal(autoStartMinKey, "-1");
-
     let startHour = parseInt(startHourStr, 10);
     let startMin = parseInt(startMinStr, 10);
-
     if (isNaN(startHour) || isNaN(startMin) || startHour === -1 || startMin === -1) return;
 
     let triggeredKey = getAutoStartTriggeredKey();
     if (getVal(triggeredKey, "false") === "true") return;
 
     let now = new Date();
-
-    // === 优化逻辑：防止浏览器休眠导致的错过时间 ===
-    // 如果当前时间已经 超过了 设定时间（哪怕是几小时），只要今天还没跑过，就触发
-    // 比如设定 8:00，电脑休眠到 9:30 才打开，脚本也会立即执行
     let isTimeReached = false;
     if (now.getHours() > startHour) {
         isTimeReached = true;
@@ -1320,294 +1418,177 @@ function checkAutoStart() {
     }
 
     if (isTimeReached) {
-        let limit = Number($("#ext-autosearch-limit").val() ?? 50);
+        let limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
         let current = Number(getVal(getAutoSearchCountKey(), 0));
-
-        // 如果还没开始搜，且还没达到今日上限 -> 自动点击开始
         if (getVal(autoSearchLockKey, "off") !== "on" && current < limit) {
              console.log(`[Rebang] Auto-start triggered. Time: ${now.toLocaleTimeString()}`);
              setVal(triggeredKey, "true");
-
-             // 模拟点击开始
              $("#ext-autosearch-lock").click();
         } else if (current >= limit) {
-             // 如果已经完成了，也标记为已触发，防止重复尝试
              setVal(triggeredKey, "true");
         }
     }
 }
 
-// 生成时间选择下拉框HTML
-function getHourOptionsHtml(selected) {
-    let html = "<option value='-1'>--</option>";
-    for(let i=0; i<24; i++) {
-        let val = i.toString();
-        html += `<option value='${val}' ${val == selected ? 'selected' : ''}>${i}</option>`;
-    }
-    return html;
-}
-
-function getMinOptionsHtml(selected) {
-    let html = "<option value='-1'>--</option>";
-    for(let i=0; i<60; i++) {
-        let val = i.toString();
-        let label = i < 10 ? '0' + i : i;
-        html += `<option value='${val}' ${val == selected ? 'selected' : ''}>${label}</option>`;
-    }
-    return html;
-}
-
-// ==========================================
-// 初始化 UI：Rewards 页
-// ==========================================
 function initRewardsControls() {
     if ($("#rebang-widget").length > 0) return;
 
     const widgetHtml = `
-    <div id='rebang-widget'>
-        <div id='rebang-header'>
-            <span id='rebang-title'>🤖 每日任务执行中...</span>
-            <div id='rebang-controls'><span id='rebang-toggle-icon' class='rebang-btn-icon'>−</span></div>
+    <div id="rebang-widget">
+        <div id="rebang-header">
+            <span id="rebang-dot" class="status-dot running"></span>
+            <span id="rebang-title">每日活动</span>
+            <span id="rebang-mini-progress">正在处理</span>
+            <button id="ext-stop-rewards" class="rebang-btn stop" type="button">停止</button>
+            <span id="rebang-toggle-icon" class="rebang-btn-icon" title="展开">−</span>
         </div>
-        <div id='rebang-body'>
-            <div class='control-row' style='justify-content:center;'>
-                <label style='font-size:12px;'>当前积分: <span id='ext-rewards-points' style='color:#d9534f; font-weight:bold;'>--</span></label>
-            </div>
-            <div class='control-row' style='justify-content:center;'>
-                <label id='ex-user-msg' style='font-size:12px; color:#0078d4;'>正在检测任务...</label>
-            </div>
-            <div class='control-row' style='margin-top:10px; justify-content:center;'>
-                <button id='ext-stop-rewards' class='rebang-btn stop' type='button' style='width:100%;'>停止并返回搜索</button>
-            </div>
+        <div id="rebang-body">
+            <div class="control-row">当前积分：<span id="ext-rewards-points">--</span></div>
+            <label id="ex-user-msg">正在读取每日活动</label>
+            <div id="ext-recent-logs"></div>
         </div>
     </div>`;
 
     $("body").append(widgetHtml);
     makeDraggable("rebang-widget", "rebang-header");
     restoreWidgetPosition();
-
-    $("#rebang-toggle-icon").click(function() {
-        const body = $("#rebang-body");
-        if (body.hasClass("minimized")) { body.removeClass("minimized"); $(this).text("−"); localStorage.setItem(widgetStateKey, 'false'); }
-        else { body.addClass("minimized"); $(this).text("+"); localStorage.setItem(widgetStateKey, 'true'); }
-    });
+    bindMiniBarToggle();
+    renderRecentLogs();
 
     $("#ext-stop-rewards").click(function() {
-        setVal(autoSearchLockKey, "off");
-        showUserMessage("已停止，即将返回...");
+        stopAutoSearch("已停止，正在返回搜索", "stopped");
         setTimeout(() => {
-            window.location.href = "https://www.bing.com/search?q=Bing+Rewards+Stopped";
+            window.location.href = BingAssistant.SEARCH_URL;
         }, 1000);
     });
 }
 
-// ==========================================
-// 初始化 UI：搜索页
-// ==========================================
 function initSearchControls() {
-  if (window.top !== window.self) return; // 不在 iframe 中运行
+  if (window.top !== window.self) return;
   $("#rebang").remove(); $("#rebang-widget").remove();
 
   if ($("#rebang-widget").length == 0) {
-    let savedHour = getVal(autoStartHourKey, "-1");
-    let savedMin = getVal(autoStartMinKey, "-1");
-    let savedMaxNoGain = getVal(maxNoGainLimitKey, "10");
-    let savedDailyRetries = getVal(dailyTaskMaxRetriesKey, "3");
-    let enableDailyTasks = getVal(enableDailyTasksKey, false);
-
+    const savedLimit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
     const widgetHtml = `
-    <div id='rebang-widget'>
-        <div id='rebang-header'>
-            <span id='rebang-title'>🔥 必应积分助手</span>
-            <div id='rebang-controls'><span id='rebang-toggle-icon' class='rebang-btn-icon' title='最小化/展开'>−</span></div>
+    <div id="rebang-widget">
+        <div id="rebang-header">
+            <span id="rebang-dot" class="status-dot"></span>
+            <span id="rebang-title">Bing 积分助手</span>
+            <span id="rebang-mini-progress">电脑搜索 0/${savedLimit}</span>
+            <span id="rebang-mini-current"></span>
+            <button id="ext-autosearch-lock" class="rebang-btn" type="button">开始</button>
+            <span id="rebang-toggle-icon" class="rebang-btn-icon" title="展开">+</span>
         </div>
-        <div id='rebang-body'>
-            <!-- 固定控制区域 -->
-            <div id='rebang-controls-fixed'>
-                <div class='control-row'>
-                    <label>榜单:</label><select id='ext-channels' class='form-select'></select>
-                    <button id='ext-keywords-refresh' class='rebang-btn' type='button' title='刷新列表'>刷新</button>
-                </div>
-                <div class='control-row'>
-                     <label>点击:</label>
-                     <select id='ext-keywords-linktype' class='form-select'><option value='搜索' selected>搜索</option><option value='打开'>打开</option></select>
-                </div>
-                <div class='control-row'>
-                     <label>任务:</label>
-                     <div class='checkbox-wrapper' title='勾选后，开始时会先去Rewards页面完成每日任务'>
-                        <input type='checkbox' id='ext-enable-dailytasks' ${enableDailyTasks ? 'checked' : ''}>
-                        <label for='ext-enable-dailytasks' style='cursor:pointer;'>开启</label>
-                     </div>
-                     <label style="margin-left:5px">重试:</label>
-                     <input type='number' id='ext-daily-retries' style='width:35px;text-align:center;border:1px solid #ccc;border-radius:4px;' value='${savedDailyRetries}'>
-                     <label>次</label>
-                </div>
-                <div class='control-row'>
-                    <label>有效搜:</label>
-                    <span id='ext-current-count' style='font-weight:bold;margin:0 2px;color:#d9534f;'>0</span>/
-                    <input type='text' id='ext-autosearch-limit' style='width:35px;text-align:center;border:1px solid #ccc;border-radius:4px;' value='50'>
-                    <label>次</label>
-                    <button id='ext-autosearch-lock' class='rebang-btn' type='button' style='margin-left:auto;'>开始</button>
-                </div>
-                <div class='search-progress-container'>
-                    <div id='search-progress-bar' class='search-progress-bar' style='width: 0%'></div>
-                </div>
-                <div class='control-row' style='font-size:11px; color:#666;'>
-                    <span id='ext-status-indicator' class='status-idle'>● 就绪</span>
-                    <span style='margin-left:auto;'>当前: <span id='ext-current-keyword' style='color:#0078d4; max-width:100px; display:inline-block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom;'>-</span></span>
-                </div>
-                <div class='control-row auto-row'>
-                     <label>自动:</label>
-                     <select id='ext-autostart-hour' class='form-select time-select'>${getHourOptionsHtml(savedHour)}</select>
-                     <label>:</label>
-                     <select id='ext-autostart-min' class='form-select time-select'>${getMinOptionsHtml(savedMin)}</select>
-                     <button id='ext-save-autostart' class='rebang-btn save' type='button'>设置</button>
-                </div>
-                <div class='control-row'>
-                     <label>失败停:</label>
-                     <input type='number' id='ext-max-nogain' style='width:40px;text-align:center;border:1px solid #ccc;border-radius:4px;' value='${savedMaxNoGain}'>
-                     <label>次无分后停止</label>
-                </div>
-                <label id='ex-user-msg'></label>
+        <div id="rebang-body">
+            <label id="ex-user-msg"></label>
+            <div class="rebang-pack-note">
+                <span>今日词库已生成 · 基于本地词包 · 未使用热榜</span>
+                <button id="ext-keywords-refresh" class="rebang-btn" type="button">换一批</button>
             </div>
-            <!-- 可滚动的关键词列表 -->
-            <div id='ext-keywords-list'></div>
+            <div id="ext-recent-logs"></div>
+            <div id="ext-keywords-list"></div>
+            <div class="control-row"><button id="rebang-open-options" class="rebang-btn" type="button">打开设置</button></div>
+            <input type="hidden" id="ext-autosearch-limit" value="${savedLimit}">
+            <select id="ext-channels" hidden></select>
+            <select id="ext-keywords-linktype" hidden><option value="搜索" selected>搜索</option></select>
+            <span id="ext-current-count" hidden>0</span>
+            <span id="ext-current-keyword" hidden>-</span>
+            <span id="ext-status-indicator" hidden></span>
+            <div class="search-progress-container" hidden><div id="search-progress-bar" class="search-progress-bar" style="width:0%"></div></div>
         </div>
     </div>`;
 
     $("body").append(widgetHtml);
     makeDraggable("rebang-widget", "rebang-header");
     restoreWidgetPosition();
+    bindMiniBarToggle();
 
-    $("#rebang-toggle-icon").click(function() {
-        const body = $("#rebang-body");
-        if (body.hasClass("minimized")) { body.removeClass("minimized"); $(this).text("−"); localStorage.setItem(widgetStateKey, 'false'); }
-        else { body.addClass("minimized"); $(this).text("+"); localStorage.setItem(widgetStateKey, 'true'); }
-    });
-
-    // 加载榜单列表（静态列表，不依赖外部 API）
-    const DEFAULT_CHANNELS = ["微博","知乎","百度","抖音","今日头条","哔哩哔哩","网易新闻","腾讯新闻","新浪新闻","IT之家"];
+    const DEFAULT_CHANNELS = [BingAssistant.WORD_PACK_SHORT, BingAssistant.WORD_PACK_LONG];
     let channelList = sessionStorage.getItem(channelListKey);
+    let listArr = DEFAULT_CHANNELS;
     if (channelList !== null) {
-        let listArr = JSON.parse(channelList);
-        initChannels(listArr, getCurrentChannel());
-        checkAndRandomizeDailyChannel(listArr);
-    } else {
-        sessionStorage.setItem(channelListKey, JSON.stringify(DEFAULT_CHANNELS));
-        initChannels(DEFAULT_CHANNELS, getCurrentChannel());
-        checkAndRandomizeDailyChannel(DEFAULT_CHANNELS);
+        try {
+            const parsed = JSON.parse(channelList);
+            if (Array.isArray(parsed) && parsed.some((name) => BingAssistant.LEGACY_CHANNELS.includes(name))) {
+                listArr = DEFAULT_CHANNELS;
+            } else if (Array.isArray(parsed) && parsed.length) {
+                listArr = parsed;
+            }
+        } catch (error) {
+            listArr = DEFAULT_CHANNELS;
+        }
     }
+    sessionStorage.setItem(channelListKey, JSON.stringify(listArr));
+    initChannels(listArr, getCurrentChannel());
+    checkAndRandomizeDailyChannel(listArr);
+    renderRecentLogs();
   }
 
-  // 页面加载时，如果在停止状态，强制重置部分计数器
   if (getVal(autoSearchLockKey, "off") == "off") {
       setVal(jumpFailCountKey, 0);
       setVal(rewardsFailCountKey, 0);
   }
 
   let currentSearchCount = Number(getVal(getAutoSearchCountKey(), 0));
-  let limitSearchCount = Number(getVal(limitSearchCountKey, 50));
+  let limitSearchCount = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
 
   $("#ext-current-count").text(currentSearchCount);
   $("#ext-autosearch-limit").val(limitSearchCount);
+  updateMiniBar();
 
   if (currentSearchCount >= limitSearchCount) { setVal(autoSearchLockKey, "off"); }
 
-  if (getVal(autoSearchLockKey, "off") == "on") { $("#ext-autosearch-lock").text("停止").addClass("stop"); }
-  else { $("#ext-autosearch-lock").text("开始").removeClass("stop"); }
-
-  // 事件绑定
-  $("#ext-channels").change(function (e) { localStorage.setItem(selectedChannelKey, $(this).val()); localStorage.setItem(currentKeywordIndexKey, 0); initKeywords(); });
-  $("#ext-keywords-linktype").change(function (e) { initKeywords(); });
-  $("#ext-autosearch-limit").change(function (e) { setVal(limitSearchCountKey, $(this).val()); });
-  $("#ext-keywords-refresh").click(function (e) {
+  $("#ext-channels").off("change.rebang").on("change.rebang", function () {
+      localStorage.setItem(selectedChannelKey, $(this).val());
+      localStorage.setItem(currentKeywordIndexKey, 0);
+      initKeywords();
+  });
+  $("#ext-keywords-refresh").off("click.rebang").on("click.rebang", function () {
       sessionStorage.removeItem(getCurrentChannelKeywordsCacheKey());
       localStorage.setItem(currentKeywordIndexKey, 0);
       initKeywords();
   });
-
-  $("#ext-max-nogain").change(function(e) { setVal(maxNoGainLimitKey, $(this).val()); });
-  $("#ext-enable-dailytasks").change(function(e) { setVal(enableDailyTasksKey, $(this).is(':checked')); });
-  $("#ext-daily-retries").change(function(e) { setVal(dailyTaskMaxRetriesKey, $(this).val()); });
-
-  $("#ext-save-autostart").click(function(e) {
-      let h = $("#ext-autostart-hour").val();
-      let m = $("#ext-autostart-min").val();
-      setVal(autoStartHourKey, h);
-      setVal(autoStartMinKey, m);
-      setVal(getAutoStartTriggeredKey(), "false");
-
-      if(h === "-1" || m === "-1") {
-          showUserMessage("已关闭自动启动");
-      } else {
-          showUserMessage(`已设置: 每天 ${h}:${m < 10 && m !== "-1" ? '0'+m : m} 后自动执行`);
-      }
+  $("#rebang-open-options").off("click.rebang").on("click.rebang", function () {
+      chrome.runtime.openOptionsPage();
   });
 
- // 点击"开始/停止"按钮
-  $("#ext-autosearch-lock").click(function (e) {
+  $("#ext-autosearch-lock").off("click.rebang").on("click.rebang", function () {
     if (getVal(autoSearchLockKey, "off") == "on") {
-      stopAutoSearch("自动搜索已停止");
+      stopAutoSearch("已停止", "stopped");
     } else {
-        // 保存设置
-        if ($("#ext-daily-retries").length) setVal(dailyTaskMaxRetriesKey, $("#ext-daily-retries").val());
-
-        // 【关键修复】: 在点击开始的一瞬间，强制读取UI上复选框的状态并写入存储
-        // 防止出现"用户勾选了，但脚本读取到的是旧值"的情况
-        if ($("#ext-enable-dailytasks").length) {
-             let isChecked = $("#ext-enable-dailytasks").is(':checked');
-             setVal(enableDailyTasksKey, isChecked);
-        }
-
-        // ▼▼▼【修改开始】▼▼▼
-
-        // 统一的逻辑判断区
         if (TEST_MODE === 1) {
-            // 1. 如果是测试模式，先强制重置所有相关状态
-            showUserMessage("测试模式: 强制重置状态...");
+            showUserMessage("测试模式：正在重置今天的状态");
             setVal(getDailyTasksDoneKey(), false);
             setVal(rewardsFailCountKey, 0);
             setVal(getDailyTaskRedirectTimeKey(), 0);
             setVal(jumpFailCountKey, 0);
             setVal(getAutoSearchCountKey(), 0);
-            // 重置后，让逻辑继续向下走，进行统一的完成状态判断
         }
 
-        // 2. 统一进行"是否完成"的判断 (无论何种模式)
-        let limit = Number($("#ext-autosearch-limit").val());
+        let limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
         let current = Number(getVal(getAutoSearchCountKey(), 0));
-
-        // 读取刚才强制同步过的状态
         let dailyEnabled = getVal(enableDailyTasksKey, false);
         let dailyDone = getVal(getDailyTasksDoneKey(), false);
 
-        // 如果搜索次数达标，并且任务部分也无需再做，则停止
         if (current >= limit && (!dailyEnabled || dailyDone)) {
-            showUserMessage("今日任务已全部完成！");
-            return; // 阻止脚本启动
+            showUserMessage("今天的任务已经完成");
+            return;
         }
-
-        // ▲▲▲【修改结束】▲▲▲
 
         setVal(autoSearchLockKey, "on");
         setVal(consecutiveNoGainKey, 0);
-
         setVal(jumpFailCountKey, 0);
         setVal(jumpLastPointsKey, -1);
         setVal(rewardsFailCountKey, 0);
-
-        setVal(globalMasterTabKey, currentTabId); // 强制设为当前页 ID
-        setVal(globalLockKey, Date.now());        // 更新活跃时间
-
+        setVal(globalMasterTabKey, currentTabId);
+        setVal(globalLockKey, Date.now());
+        setVal(BingAssistant.KEYS.productState, "running");
+        setVal(BingAssistant.KEYS.runStartedAt, Date.now());
         $(this).text("停止").addClass("stop");
-        showUserMessage("初始化中...");
+        showUserMessage("正在开始今天的任务");
         setVal(autoSearchLockExpiresKey, 0);
-
-        // 启动时将 lastPoints 设为 null，而不是当前分。
-        // 这样第一次进入 doAutoSearch 时会跳过积分对比逻辑，避免"无分"误报。
         setVal(lastPointsKey, null);
-        // ===================
-
+        updateMiniBar();
         doAutoSearch();
     }
   });
@@ -1643,7 +1624,8 @@ function initSearchControls() {
               checkAutoStart();
 
               // 如果开关开启，执行搜索循环
-              if ($("#ext-autosearch-limit").val() && $("#ext-autosearch-limit").val().trim() != "" && getVal(autoSearchLockKey, "off") == "on") {
+              publishAssistantState();
+              if (getVal(autoSearchLockKey, "off") == "on") {
                  doAutoSearch();
               }
             }, 1000); // 1秒心跳
