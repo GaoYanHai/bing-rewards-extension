@@ -5,8 +5,11 @@ const scheduleEnabled = document.getElementById("schedule-enabled");
 const scheduleTime = document.getElementById("schedule-time");
 const nextRun = document.getElementById("next-run");
 const todayGoal = document.getElementById("today-goal");
+const weekendGoal = document.getElementById("weekend-goal");
 const searchLimit = document.getElementById("search-limit");
+const weekendSearchLimit = document.getElementById("weekend-search-limit");
 const mobileQuota = document.getElementById("mobile-quota");
+const missedRemind = document.getElementById("missed-remind");
 const notifyEnabled = document.getElementById("notify-enabled");
 const wordPack = document.getElementById("word-pack");
 const customKeywords = document.getElementById("custom-keywords");
@@ -63,9 +66,17 @@ function fill(store) {
   nextRun.textContent = model.schedule.enabled
     ? `下次启动：${model.nextRunLabel}`
     : `下次启动：未设置，建议${A.suggestedTimeLabel()}`;
-  todayGoal.value = model.goal;
-  searchLimit.value = String(model.limit);
+  todayGoal.value = model.weekdayGoal || model.goal;
+  weekendGoal.value = model.weekendGoal || A.WEEKEND_GOAL_SAME;
+  searchLimit.value = String(model.weekdayLimit || model.limit);
+  weekendSearchLimit.value = model.weekendSearchLimit === "" || model.weekendSearchLimit == null ? "" : String(model.weekendSearchLimit);
+  missedRemind.checked = model.missedRemindEnabled;
   notifyEnabled.checked = model.notifyEnabled;
+  const copy = model.whatsNew || A.whatsNewCopy();
+  const titleEl = document.getElementById("whats-new-title");
+  const pointsEl = document.getElementById("whats-new-points");
+  if (titleEl) titleEl.textContent = copy.title;
+  if (pointsEl) pointsEl.innerHTML = (copy.points || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
   wordPack.value = model.wordPack;
   customKeywords.value = model.customKeywords;
   noGainLimit.value = String(model.noGainLimit);
@@ -147,11 +158,24 @@ scheduleTime.addEventListener("change", async () => {
 });
 
 todayGoal.addEventListener("change", () => send("SET_TODAY_GOAL", { goal: todayGoal.value }));
+weekendGoal.addEventListener("change", () => save({ [A.KEYS.weekendGoal]: A.normalizeWeekendGoal(weekendGoal.value) }));
 searchLimit.addEventListener("change", () => {
   const value = Math.max(1, Number(searchLimit.value) || A.DEFAULT_SEARCH_LIMIT);
   searchLimit.value = String(value);
   void save({ [A.KEYS.limitSearchCount]: value });
 });
+weekendSearchLimit.addEventListener("change", () => {
+  const raw = String(weekendSearchLimit.value || "").trim();
+  if (!raw) {
+    weekendSearchLimit.value = "";
+    void save({ [A.KEYS.weekendSearchLimit]: "" });
+    return;
+  }
+  const value = Math.max(1, Number(raw) || A.DEFAULT_SEARCH_LIMIT);
+  weekendSearchLimit.value = String(value);
+  void save({ [A.KEYS.weekendSearchLimit]: value });
+});
+missedRemind.addEventListener("change", () => save({ [A.KEYS.missedRemindEnabled]: missedRemind.checked }));
 notifyEnabled.addEventListener("change", () => save({ [A.KEYS.notifyEnabled]: notifyEnabled.checked }));
 wordPack.addEventListener("change", async () => {
   await save({ [A.KEYS.selectedChannel]: wordPack.value });

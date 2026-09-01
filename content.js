@@ -736,7 +736,7 @@ function stopAutoSearch(msg, reason, reasonCode, extra) {
         where: extra && extra.where,
         message: msg || "",
         count: Number(getVal(getAutoSearchCountKey(), 0)),
-        limit: Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT)),
+        limit: todaySearchLimit(),
         startedAt: Number(getVal(BingAssistant.KEYS.runStartedAt, 0))
     }).catch(() => {});
 }
@@ -864,7 +864,7 @@ function renderRecentLogs() {
 
 function updateMiniBar() {
   const count = Number(getVal(getAutoSearchCountKey(), 0));
-  const limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+  const limit = todaySearchLimit();
   const running = getVal(autoSearchLockKey, "off") === "on";
   const paused = isRunPaused();
   const model = BingAssistant.buildViewModel(rebangExtensionStore);
@@ -882,6 +882,8 @@ function updateMiniBar() {
   }
   const keyword = ($("#ext-current-keyword").text() || "").trim();
   if (paused) $("#rebang-mini-current").text("已暂停");
+  else if (!running && model.state === "failed") $("#rebang-mini-current").text(model.failShort || "已停止");
+  else if (!running && model.state === "complete") $("#rebang-mini-current").text("今天已完成");
   else $("#rebang-mini-current").text(running && keyword && keyword !== "-" ? keyword : "");
   publishAssistantState();
 }
@@ -1038,11 +1040,20 @@ function goToRewardsPage(nowTime, currentPoints) {
 }
 
 function currentGoal() {
-    return BingAssistant.normalizeGoal(rebangExtensionStore);
+    return BingAssistant.effectiveGoal(rebangExtensionStore);
+}
+
+function todaySearchLimit() {
+    return BingAssistant.effectiveSearchLimit(rebangExtensionStore);
 }
 
 function dailyTasksWanted() {
     return BingAssistant.goalEnablesDaily(currentGoal());
+}
+
+function isRewardsDashboard() {
+    const path = (location.pathname || "/").replace(/\/+$/, "") || "/";
+    return path === "/" || path === "/dashboard" || path === "/welcome";
 }
 
 function cardTitle($card, fallback) {
@@ -1153,7 +1164,7 @@ function finishDailyAndReturn(msg, logEvent) {
     sessionStorage.removeItem("Rebang_SessionClicked");
     if (msg) showUserMessage(msg, logEvent || { action: msg });
     const count = Number(getVal(getAutoSearchCountKey(), 0));
-    const limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+    const limit = todaySearchLimit();
     setTimeout(() => {
         if (count >= limit) stopAutoSearch(msg || "今天的任务已完成", "complete");
         window.location.href = BingAssistant.SEARCH_URL;
@@ -1212,6 +1223,12 @@ async function handleRewardsPage() {
     if (!dailyTasksWanted()) {
         showUserMessage("安全模式已开，正在返回搜索", { action: "安全模式已开，正在返回搜索" });
         setTimeout(() => { window.location.href = BingAssistant.SEARCH_URL; }, 1000);
+        return;
+    }
+
+    if (!cards.length && !isRewardsDashboard()) {
+        showUserMessage("正在返回每日活动清单");
+        setTimeout(() => { window.location.href = BingAssistant.REWARDS_URL; }, 1200);
         return;
     }
 
@@ -1440,7 +1457,7 @@ async function doAutoSearch() {
   pointsMissCount = 0;
 
   const currentSearchCountNow = Number(getVal(getAutoSearchCountKey(), 0));
-  const limitSearchCountNow = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+  const limitSearchCountNow = todaySearchLimit();
   if (currentSearchCountNow >= limitSearchCountNow) {
       if (enableDaily && !dailyDone) {
           goToRewardsPage(nowTime, currentPoints);
@@ -1498,7 +1515,7 @@ async function doAutoSearch() {
   $("#ext-current-count").text(currentSearchCount);
 
   // 【新增】更新进度条和状态指示器
-  let limitSearchCount = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+  let limitSearchCount = todaySearchLimit();
   let progressPercent = Math.min((currentSearchCount / limitSearchCount) * 100, 100);
   $("#search-progress-bar").css("width", progressPercent + "%");
 
@@ -1620,7 +1637,7 @@ function initKeywords() {
   if (keywords && keywords.length > 0) {
     renderKeywords(keywords);
   } else {
-    var limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+    var limit = todaySearchLimit();
     keywords = generateDailyKeywords(limit + 10, getCurrentChannel()).filter((item) => !blocked.has(item.title));
     sessionStorage.setItem(cacheKey, JSON.stringify(keywords));
     renderKeywords(keywords);
@@ -1773,7 +1790,7 @@ function checkAutoStart() {
     }
 
     if (isTimeReached) {
-        let limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+        let limit = todaySearchLimit();
         let current = Number(getVal(getAutoSearchCountKey(), 0));
         if (getVal(autoSearchLockKey, "off") !== "on" && current < limit) {
              console.log(`[Rebang] Auto-start triggered. Time: ${now.toLocaleTimeString()}`);
@@ -1850,7 +1867,7 @@ function initSearchControls() {
   $("#rebang").remove(); $("#rebang-widget").remove();
 
   if ($("#rebang-widget").length == 0) {
-    const savedLimit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+    const savedLimit = todaySearchLimit();
     const widgetHtml = `
     <div id="rebang-widget">
         <div id="rebang-header">
@@ -1914,7 +1931,7 @@ function initSearchControls() {
   }
 
   let currentSearchCount = Number(getVal(getAutoSearchCountKey(), 0));
-  let limitSearchCount = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+  let limitSearchCount = todaySearchLimit();
 
   $("#ext-current-count").text(currentSearchCount);
   $("#ext-autosearch-limit").val(limitSearchCount);
@@ -1966,7 +1983,7 @@ function initSearchControls() {
             setVal(getAutoSearchCountKey(), 0);
         }
 
-        let limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
+        let limit = todaySearchLimit();
         let current = Number(getVal(getAutoSearchCountKey(), 0));
         let dailyEnabled = dailyTasksWanted();
         let dailyDone = getVal(getDailyTasksDoneKey(), false);
