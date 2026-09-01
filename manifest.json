@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Bing 积分助手",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "帮你在浏览器开着的时候完成今天的 Bing 搜索，并随时看清进度。",
   "permissions": [
     "alarms",

@@ -14,6 +14,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         key === BingAssistant.KEYS.limitSearchCount ||
         key === BingAssistant.KEYS.lastKeyword ||
         key === BingAssistant.KEYS.productState ||
+        key === BingAssistant.KEYS.paused ||
+        key === BingAssistant.KEYS.pauseReason ||
+        key === BingAssistant.KEYS.waitingUserTask ||
+        key === BingAssistant.KEYS.userTaskAction ||
         key === BingAssistant.KEYS.taskList ||
         key === BingAssistant.KEYS.dailyKeywordPlan ||
         key === BingAssistant.KEYS.blockedKeywords ||
@@ -27,6 +31,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     }
     if (shouldRefreshBar && typeof updateMiniBar === "function") updateMiniBar();
     if (changes[BingAssistant.KEYS.taskList] && typeof renderTaskListFromStore === "function") renderTaskListFromStore();
+    if ((changes[BingAssistant.KEYS.userTaskAction] || changes[BingAssistant.KEYS.paused]) && typeof handleRewardsPage === "function" && location.hostname === "rewards.bing.com") {
+        handleRewardsPage();
+    }
 });
 
 function GM_getValue(key, defaultValue) {
@@ -251,7 +258,9 @@ GM_addStyle(`
     .rebang-task { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.06); }
     .rebang-task span { color: #666; white-space: nowrap; }
     #ext-task-summary { font-size: 12px; color: #666; margin: 6px 0; }
-    #ext-skip-user-task { margin: 6px 0 10px; }
+    #ext-skip-user-task, #ext-confirm-user-task { margin: 6px 6px 10px 0; }
+    .status-dot.paused { background: #c19c00; }
+    #ext-user-task-actions { display: none; margin: 6px 0 10px; }
     #ex-user-msg { color: #605e5c; }
     .b_dark #rebang-mini-current, .b_dark .rebang-pack-note, .b_dark .rebang-log, .b_dark #ex-user-msg { color: #bbb; }
     @media (prefers-color-scheme: dark) {
@@ -270,6 +279,71 @@ var $ = jQuery.noConflict(true);
 // GM_getValue / GM_setValue 封装
 function getVal(key, defaultValue) { return GM_getValue(key, defaultValue); }
 function setVal(key, value) { GM_setValue(key, value); }
+
+let simulatingTyping = false;
+let searchInFlight = false;
+let lastUserInputAt = 0;
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRunPaused() {
+    return getVal(BingAssistant.KEYS.paused, false) === true && getVal(autoSearchLockKey, "off") === "on";
+}
+
+function currentIntervalRange() {
+    return BingAssistant.normalizeIntervalRange(
+        getVal(BingAssistant.KEYS.searchIntervalMin, BingAssistant.DEFAULT_INTERVAL_MIN),
+        getVal(BingAssistant.KEYS.searchIntervalMax, BingAssistant.DEFAULT_INTERVAL_MAX)
+    );
+}
+
+function isEditableTarget(el) {
+    if (!el || el === document.body || el === document.documentElement) return false;
+    const tag = (el.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    if (el.isContentEditable) return true;
+    return false;
+}
+
+function isFullscreenNow() {
+    if (document.fullscreenElement) return true;
+    return window.innerHeight >= screen.height - 2 && window.innerWidth >= screen.width - 2;
+}
+
+function isUserBusyNow() {
+    if (simulatingTyping) return false;
+    if (Number(getVal(BingAssistant.KEYS.ignoreBusyUntil, 0)) > Date.now()) return false;
+    if (getVal(BingAssistant.KEYS.pauseWhenBusy, true) === false) return false;
+    if (isFullscreenNow()) return true;
+    const typingRecently = Date.now() - lastUserInputAt < 4000;
+    return typingRecently && isEditableTarget(document.activeElement);
+}
+
+function rememberStartPoints(points) {
+    if (points === null || points === undefined) return;
+    const existing = BingAssistant.readablePoints(getVal(BingAssistant.KEYS.runStartPoints, null));
+    if (existing === null) setVal(BingAssistant.KEYS.runStartPoints, Number(points));
+}
+
+function setUserTaskButtons(visible) {
+    const box = $("#ext-user-task-actions");
+    if (box.length) box.toggle(!!visible);
+    $("#ext-confirm-user-task").toggle(!!visible);
+    $("#ext-skip-user-task").toggle(!!visible);
+}
+
+document.addEventListener("keydown", (event) => {
+    if (simulatingTyping) return;
+    if (isEditableTarget(event.target) || isEditableTarget(document.activeElement)) {
+        lastUserInputAt = Date.now();
+    }
+}, true);
+document.addEventListener("input", (event) => {
+    if (simulatingTyping) return;
+    if (isEditableTarget(event.target)) lastUserInputAt = Date.now();
+}, true);
 
 // 常量定义
 const prefix = "Rebang_";
@@ -792,19 +866,23 @@ function updateMiniBar() {
   const count = Number(getVal(getAutoSearchCountKey(), 0));
   const limit = Number(getVal(limitSearchCountKey, BingAssistant.DEFAULT_SEARCH_LIMIT));
   const running = getVal(autoSearchLockKey, "off") === "on";
+  const paused = isRunPaused();
   const model = BingAssistant.buildViewModel(rebangExtensionStore);
   $("#rebang-mini-progress").text(`电脑搜索 ${count}/${limit}`);
   $("#ext-task-summary").text(`每日活动 ${model.dailyProgress}`);
   $("#ext-current-count").text(count);
-  if (running) {
+  $("#rebang-dot").toggleClass("running", running && !paused);
+  $("#rebang-dot").toggleClass("paused", paused);
+  if (paused) {
+    $("#ext-autosearch-lock").text("继续").removeClass("stop");
+  } else if (running) {
     $("#ext-autosearch-lock").text("停止").addClass("stop");
-    $("#rebang-dot").addClass("running");
   } else {
     $("#ext-autosearch-lock").text("开始").removeClass("stop");
-    $("#rebang-dot").removeClass("running");
   }
   const keyword = ($("#ext-current-keyword").text() || "").trim();
-  $("#rebang-mini-current").text(running && keyword && keyword !== "-" ? keyword : "");
+  if (paused) $("#rebang-mini-current").text("已暂停");
+  else $("#rebang-mini-current").text(running && keyword && keyword !== "-" ? keyword : "");
   publishAssistantState();
 }
 
@@ -815,35 +893,103 @@ function showUserMessage(msg, logEvent) {
   publishAssistantState();
 }
 
+function findSearchBox() {
+    const $input = $("#sb_form_q");
+    let $btn = $("#sb_form_go");
+    if ($btn.length === 0) $btn = $("#sb_form_submit");
+    if ($btn.length === 0) $btn = $(".search_icon, .b_searchboxSubmit");
+    return { $input, $btn };
+}
+
+function nativeSetValue(el, value) {
+    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, "value");
+    if (desc && desc.set) desc.set.call(el, value);
+    else el.value = value;
+}
+
 function doSearch(keyword) {
-    // 1. 尝试使用脚本 2 的逻辑：模拟点击搜索按钮
-    // 这样 Bing 会自动添加 &form=QBRE, &cvid=... 等关键参数
-    let $input = $("#sb_form_q");
-    let $btn = $("#sb_form_go"); // 桌面端常用 ID
-
-    // 兼容性查找按钮
-    if ($btn.length === 0) $btn = $("#sb_form_submit"); // 移动端或旧版
-    if ($btn.length === 0) $btn = $(".search_icon, .b_searchboxSubmit"); // 通用类名
-
-    if ($input.length > 0 && $btn.length > 0) {
-        // 填入关键词
-        $input.val(keyword);
-
-        // 触发 React/Angular 等框架可能需要的 input 事件
+    const box = findSearchBox();
+    if (box.$input.length > 0 && box.$btn.length > 0) {
+        box.$input.val(keyword);
         try {
-            let evt = new Event('input', { bubbles: true });
-            $input[0].dispatchEvent(evt);
-            $input[0].value = keyword; //再一次确保赋值
-        } catch(e) {}
+            nativeSetValue(box.$input[0], keyword);
+            box.$input[0].dispatchEvent(new Event("input", { bubbles: true }));
+        } catch (e) {}
+        box.$btn[0].click();
+        return true;
+    }
+    pushRunLog({
+        action: "找不到搜索框",
+        result: "改用跳转搜索",
+        reason: "页面改版",
+        reasonCode: BingAssistant.FAIL_CODES.PAGE_CHANGED
+    });
+    window.location.href = "https://www.bing.com/search?q=" + encodeURIComponent(keyword) + "&form=QBRE&sp=-1&lq=0";
+    return false;
+}
 
-        // 模拟点击
-        $btn[0].click();
+async function typeKeywordLikeHuman(keyword) {
+    const box = findSearchBox();
+    if (box.$input.length === 0 || box.$btn.length === 0) return false;
+    simulatingTyping = true;
+    try {
+        box.$input.trigger("focus");
+        nativeSetValue(box.$input[0], "");
+        box.$input[0].dispatchEvent(new Event("input", { bubbles: true }));
+        for (let i = 0; i < keyword.length; i++) {
+            if (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) return false;
+            nativeSetValue(box.$input[0], keyword.slice(0, i + 1));
+            box.$input[0].dispatchEvent(new Event("input", { bubbles: true }));
+            await sleep(70 + Math.floor(Math.random() * 110));
+        }
+        await sleep(180 + Math.floor(Math.random() * 220));
+        if (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) return false;
+        box.$btn[0].click();
+        return true;
+    } catch (error) {
+        return false;
+    } finally {
+        simulatingTyping = false;
     }
-    else {
-        // 2. 兜底方案：如果找不到按钮，手动构建带参数的 URL
-        // &form=QBRE 是 Bing 判断是否为"手动搜索"的核心参数
-        window.location.href = "https://www.bing.com/search?q=" + encodeURIComponent(keyword) + "&form=QBRE&sp=-1&lq=0";
+}
+
+async function performSearch(keyword) {
+    const simulate = getVal(BingAssistant.KEYS.simulateTyping, false) === true;
+    if (simulate) {
+        const typed = await typeKeywordLikeHuman(keyword);
+        if (typed) return true;
+        if (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) return false;
     }
+    return doSearch(keyword);
+}
+
+async function maybeHandleBusyPause() {
+    if (getVal(autoSearchLockKey, "off") !== "on") return false;
+    if (getVal(BingAssistant.KEYS.pauseReason, "") === BingAssistant.PAUSE_REASONS.USER) return true;
+    if (isUserBusyNow()) {
+        if (!isRunPaused()) {
+            await chrome.runtime.sendMessage({
+                type: "PAUSE_TODAY",
+                reason: BingAssistant.PAUSE_REASONS.BUSY,
+                message: "你正在用电脑，已暂时停下"
+            }).catch(() => {});
+            showUserMessage("你正在用电脑，已暂时停下");
+            updateMiniBar();
+        }
+        return true;
+    }
+    if (isRunPaused() && getVal(BingAssistant.KEYS.pauseReason, "") === BingAssistant.PAUSE_REASONS.BUSY) {
+        await chrome.runtime.sendMessage({
+            type: "RESUME_TODAY",
+            silent: true,
+            ignoreBusyMs: 0
+        }).catch(() => {});
+        showUserMessage("已继续今天的任务");
+        updateMiniBar();
+        return false;
+    }
+    return isRunPaused();
 }
 
 // ==========================================
@@ -1014,7 +1160,7 @@ function finishDailyAndReturn(msg, logEvent) {
     }, 1200);
 }
 
-function handleRewardsPage() {
+async function handleRewardsPage() {
     let isLocked = getVal(autoSearchLockKey, "off");
     let currentPoints = getBingPoints();
     if (currentPoints !== null) {
@@ -1046,6 +1192,13 @@ function handleRewardsPage() {
     }
 
     if (isLocked !== "on") return;
+    rememberStartPoints(currentPoints);
+    if (isRunPaused()) {
+        $("#rebang-mini-progress").text("已暂停");
+        $("#rebang-dot").removeClass("running").addClass("paused");
+    } else {
+        $("#rebang-dot").addClass("running").removeClass("paused");
+    }
 
     const login = detectLoginState();
     if (login === "out") {
@@ -1059,6 +1212,25 @@ function handleRewardsPage() {
     if (!dailyTasksWanted()) {
         showUserMessage("安全模式已开，正在返回搜索", { action: "安全模式已开，正在返回搜索" });
         setTimeout(() => { window.location.href = BingAssistant.SEARCH_URL; }, 1000);
+        return;
+    }
+
+    const userAction = getVal(BingAssistant.KEYS.userTaskAction, "");
+    if (userAction === "skip") {
+        setVal(BingAssistant.KEYS.userTaskAction, "");
+        $("#ext-skip-user-task").click();
+        return;
+    }
+
+    if (isRunPaused() && userAction !== "done") {
+        const waitingNow = getVal(BingAssistant.KEYS.waitingUserTask, null);
+        if (waitingNow && waitingNow.url) {
+            showUserMessage(`需要你点一下：${waitingNow.name || "每日活动"}`);
+            setUserTaskButtons(true);
+        } else {
+            showUserMessage(BingAssistant.pauseStatusText(getVal(BingAssistant.KEYS.pauseReason, "")));
+            setUserTaskButtons(false);
+        }
         return;
     }
 
@@ -1078,14 +1250,45 @@ function handleRewardsPage() {
         const current = cards.find((card) => card.url === waiting.url);
         if (current && current.status === BingAssistant.TASK_STATUS.DONE) {
             setVal(BingAssistant.KEYS.waitingUserTask, null);
+            setVal(BingAssistant.KEYS.userTaskAction, "");
+            setVal(BingAssistant.KEYS.userTaskConfirmTries, 0);
+            setUserTaskButtons(false);
             showUserMessage(`“${truncateText(waiting.name, 10)}”已完成，继续处理`, { action: `“${waiting.name}”`, result: "已完成" });
+        } else if (userAction === "done") {
+            let tries = Number(getVal(BingAssistant.KEYS.userTaskConfirmTries, 0)) + 1;
+            setVal(BingAssistant.KEYS.userTaskConfirmTries, tries);
+            const lastPts = Number(getVal(rewardsLastPointsKey, -1));
+            if (currentPoints !== null && lastPts !== -1 && currentPoints > lastPts) {
+                const updated = markCard(cards, waiting.url, BingAssistant.TASK_STATUS.DONE, `积分 +${currentPoints - lastPts}`);
+                saveTaskList(updated);
+                renderTaskList(updated);
+                setVal(BingAssistant.KEYS.waitingUserTask, null);
+                setVal(BingAssistant.KEYS.userTaskAction, "");
+                setVal(BingAssistant.KEYS.userTaskConfirmTries, 0);
+                setUserTaskButtons(false);
+                showUserMessage(`“${truncateText(waiting.name, 10)}”已得分`, { action: `“${waiting.name}”`, result: "已完成" });
+            } else if (tries >= 3) {
+                setVal(BingAssistant.KEYS.userTaskAction, "");
+                showUserMessage("还没看到这张完成。确认点完后再试，或跳过这张。");
+                setUserTaskButtons(true);
+                return;
+            } else {
+                showUserMessage("正在确认你刚才点的活动是否完成...");
+                setUserTaskButtons(true);
+                return;
+            }
         } else {
             showUserMessage(`需要你点一下：${waiting.name || "每日活动"}`);
-            $("#ext-skip-user-task").show();
+            setUserTaskButtons(true);
             return;
         }
     }
-    $("#ext-skip-user-task").hide();
+    setUserTaskButtons(false);
+
+    if (await maybeHandleBusyPause()) {
+        if (waiting && waiting.url) setUserTaskButtons(true);
+        return;
+    }
 
     let lastClickTime = Number(getVal(rewardsClickTimeKey, 0));
     let now = new Date().getTime();
@@ -1145,8 +1348,9 @@ function handleRewardsPage() {
 
     if (next.mode === "manual") {
         setVal(BingAssistant.KEYS.waitingUserTask, { name: target.name, url: target.url, kind: target.kind, reason: target.reason });
+        if (currentPoints !== null) setVal(rewardsLastPointsKey, currentPoints);
         showUserMessage(`需要你点一下：${target.name}`, { action: `需要你点一下：${target.name}`, reason: target.reason });
-        $("#ext-skip-user-task").show();
+        setUserTaskButtons(true);
         return;
     }
 
@@ -1173,7 +1377,8 @@ function handleRewardsPage() {
     }
 }
 
-function doAutoSearch() {
+async function doAutoSearch() {
+  if (searchInFlight) return;
   // --- 多标签页互斥检查 (要求1 & 4) ---
   // 每次执行搜索前，先同步状态。如果不是主控页，且有其他页面刚跑过，则跳过本次执行。
   let isMaster = syncTabStatus();
@@ -1188,6 +1393,10 @@ function doAutoSearch() {
   // 那么我就绝对不动，老老实实待机，实现"固定主控"。
   if (!isMaster) {
       console.log(`[Rebang] Slave tab standby. Waiting for Master.`);
+      return;
+  }
+  if (await maybeHandleBusyPause()) {
+      updateMiniBar();
       return;
   }
   // -----------------------------------
@@ -1217,6 +1426,7 @@ function doAutoSearch() {
   searchBoxMissCount = 0;
 
   let currentPoints = getBingPoints();
+  rememberStartPoints(currentPoints);
   if (currentPoints === null) {
       pointsMissCount += 1;
       if (document.readyState === "complete" && pointsMissCount >= 8) {
@@ -1247,7 +1457,8 @@ function doAutoSearch() {
 
   if (jobLockExpires > now) {
       let secondsLeft = Math.ceil((jobLockExpires - now) / 1000);
-      showUserMessage(`正在模拟常规搜索，间隔 8-14 秒（还剩 ${secondsLeft} 秒）`);
+      const range = currentIntervalRange();
+      showUserMessage(`正在模拟常规搜索，间隔 ${range.min}-${range.max} 秒（还剩 ${secondsLeft} 秒）`);
       return;
   }
 
@@ -1313,7 +1524,8 @@ function doAutoSearch() {
   // -------------------------------------
 
   // 设置下次搜索的随机延迟 (8-14秒)，使用时间戳存储
-  let randomDelay = Math.floor(Math.random() * 6000) + 8000;
+  const range = currentIntervalRange();
+  let randomDelay = BingAssistant.randomSearchDelayMs(range.min, range.max);
   setVal(autoSearchLockExpiresKey, Date.now() + randomDelay);
 
   // 获取关键词并执行搜索
@@ -1354,7 +1566,16 @@ function doAutoSearch() {
     $("#ext-current-keyword").text(currentKw);
     updateMiniBar();
 
-    doSearch(word);
+    searchInFlight = true;
+    const startedIndex = currentKeywordIndex;
+    try {
+      const ok = await performSearch(word);
+      if (!ok && isRunPaused()) {
+        localStorage.setItem(currentKeywordIndexKey, String(startedIndex - 1));
+      }
+    } finally {
+      searchInFlight = false;
+    }
   } else {
     // 如果没有关键词或搜完了
     if (!keywords) {
@@ -1538,6 +1759,7 @@ function checkAutoStart() {
     let startHour = parseInt(startHourStr, 10);
     let startMin = parseInt(startMinStr, 10);
     if (isNaN(startHour) || isNaN(startMin) || startHour === -1 || startMin === -1) return;
+    if (!BingAssistant.isScheduledDay(new Date(), getVal(BingAssistant.KEYS.repeatRule, BingAssistant.REPEAT.DAILY))) return;
 
     let triggeredKey = getAutoStartTriggeredKey();
     if (getVal(triggeredKey, "false") === "true") return;
@@ -1580,7 +1802,10 @@ function initRewardsControls() {
             <div id="ext-task-summary">每日活动 待识别</div>
             <label id="ex-user-msg">正在读取每日活动</label>
             <div id="ext-task-list"></div>
-            <button id="ext-skip-user-task" class="rebang-btn" type="button" style="display:none">跳过这张</button>
+            <div id="ext-user-task-actions" style="display:none">
+                <button id="ext-confirm-user-task" class="rebang-btn save" type="button">我点完了</button>
+                <button id="ext-skip-user-task" class="rebang-btn" type="button">跳过这张</button>
+            </div>
             <div id="ext-recent-logs"></div>
         </div>
     </div>`;
@@ -1607,8 +1832,16 @@ function initRewardsControls() {
         sessionClicked.push(waiting.url);
         sessionStorage.setItem("Rebang_SessionClicked", JSON.stringify(sessionClicked));
         setVal(BingAssistant.KEYS.waitingUserTask, null);
+        setVal(BingAssistant.KEYS.userTaskAction, "");
+        setVal(BingAssistant.KEYS.userTaskConfirmTries, 0);
         showUserMessage(`已跳过「${waiting.name}」`, { action: `跳过「${waiting.name}」`, result: "已跳过", reason: "你跳过了这张" });
-        $("#ext-skip-user-task").hide();
+        setUserTaskButtons(false);
+    });
+    $("#ext-confirm-user-task").click(function() {
+        const waiting = getVal(BingAssistant.KEYS.waitingUserTask, null);
+        if (!waiting || !waiting.url) return;
+        chrome.runtime.sendMessage({ type: "USER_TASK_DONE" }).catch(() => {});
+        showUserMessage("正在确认你刚才点的活动是否完成...");
     });
 }
 
@@ -1716,6 +1949,12 @@ function initSearchControls() {
 
   $("#ext-autosearch-lock").off("click.rebang").on("click.rebang", function () {
     if (getVal(autoSearchLockKey, "off") == "on") {
+      if (isRunPaused()) {
+        chrome.runtime.sendMessage({ type: "RESUME_TODAY" }).catch(() => {});
+        showUserMessage("继续今天的任务");
+        updateMiniBar();
+        return;
+      }
       stopAutoSearch("已停止", "stopped");
     } else {
         if (TEST_MODE === 1) {
@@ -1750,6 +1989,9 @@ function initSearchControls() {
         setVal(globalLockKey, Date.now());
         setVal(BingAssistant.KEYS.productState, "running");
         setVal(BingAssistant.KEYS.runStartedAt, Date.now());
+        setVal(BingAssistant.KEYS.paused, false);
+        setVal(BingAssistant.KEYS.pauseReason, "");
+        rememberStartPoints(getBingPoints());
         $(this).text("停止").addClass("stop");
         showUserMessage("正在开始今天的任务", { action: "开始今日任务" });
         setVal(autoSearchLockExpiresKey, 0);

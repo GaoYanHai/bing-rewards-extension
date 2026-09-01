@@ -10,15 +10,16 @@ async function readStore() {
 }
 
 async function readSchedule() {
-  const values = await chrome.storage.local.get([KEYS.autoStartHour, KEYS.autoStartMin]);
-  return A.parseHourMinute(values[KEYS.autoStartHour], values[KEYS.autoStartMin]);
+  const values = await chrome.storage.local.get([KEYS.autoStartHour, KEYS.autoStartMin, KEYS.repeatRule]);
+  const parsed = A.parseHourMinute(values[KEYS.autoStartHour], values[KEYS.autoStartMin]);
+  return { ...parsed, rule: A.normalizeRepeatRule(values[KEYS.repeatRule]) };
 }
 
 async function scheduleNextAlarm() {
   await chrome.alarms.clear(A.ALARM_NAME);
   const schedule = await readSchedule();
   if (!schedule.enabled) return;
-  const when = A.nextScheduledTime(schedule.hour, schedule.minute).getTime();
+  const when = A.nextScheduledTime(schedule.hour, schedule.minute, new Date(), schedule.rule).getTime();
   await chrome.alarms.create(A.ALARM_NAME, { when });
 }
 
@@ -33,6 +34,20 @@ async function openOrWakeSearchTab() {
     return usableTab.id;
   }
   const created = await chrome.tabs.create({ url: A.SEARCH_URL, active: true });
+  return created.id;
+}
+
+async function openOrWakeRewardsTab() {
+  const tabs = await chrome.tabs.query({ url: ["https://rewards.bing.com/*"] });
+  const usableTab = tabs.find((tab) => typeof tab.id === "number");
+  if (usableTab) {
+    await chrome.tabs.update(usableTab.id, { active: true });
+    if (typeof usableTab.windowId === "number") {
+      await chrome.windows.update(usableTab.windowId, { focused: true });
+    }
+    return usableTab.id;
+  }
+  const created = await chrome.tabs.create({ url: A.REWARDS_URL, active: true });
   return created.id;
 }
 
@@ -55,12 +70,23 @@ function withLog(store, event) {
   return A.appendRunLog(store[KEYS.runLogs], event);
 }
 
+function clearRunFlags() {
+  return {
+    [KEYS.paused]: false,
+    [KEYS.pauseReason]: "",
+    [KEYS.userTaskAction]: "",
+    [KEYS.userTaskConfirmTries]: 0,
+    [KEYS.ignoreBusyUntil]: 0
+  };
+}
+
 async function updateBadge() {
   const model = A.buildViewModel(await readStore());
   let text = "";
   let color = "#0078D4";
-  if (model.state === "running") {
+  if (model.state === "running" || model.state === "paused") {
     text = String(model.count);
+    if (model.state === "paused") color = "#C19C00";
   } else if (model.state === "complete") {
     text = "✓";
     color = "#107C10";
@@ -94,6 +120,14 @@ async function applyDefaultsIfNeeded() {
   if (store[KEYS.catchUpAsk] === undefined) patch[KEYS.catchUpAsk] = false;
   if (store[KEYS.quizAssistEnabled] === undefined) patch[KEYS.quizAssistEnabled] = false;
   if (store[KEYS.keywordShuffle] === undefined) patch[KEYS.keywordShuffle] = 0;
+  if (store[KEYS.paused] === undefined) patch[KEYS.paused] = false;
+  if (store[KEYS.pauseReason] === undefined) patch[KEYS.pauseReason] = "";
+  if (store[KEYS.searchIntervalMin] === undefined) patch[KEYS.searchIntervalMin] = A.DEFAULT_INTERVAL_MIN;
+  if (store[KEYS.searchIntervalMax] === undefined) patch[KEYS.searchIntervalMax] = A.DEFAULT_INTERVAL_MAX;
+  if (store[KEYS.simulateTyping] === undefined) patch[KEYS.simulateTyping] = false;
+  if (store[KEYS.pauseWhenBusy] === undefined) patch[KEYS.pauseWhenBusy] = true;
+  if (store[KEYS.repeatRule] === undefined) patch[KEYS.repeatRule] = A.REPEAT.DAILY;
+  if (store[KEYS.userTaskAction] === undefined) patch[KEYS.userTaskAction] = "";
   if (A.LEGACY_CHANNELS.includes(store[KEYS.selectedChannel])) {
     patch[KEYS.selectedChannel] = A.WORD_PACK_SHORT;
   } else if (!store[KEYS.selectedChannel]) {
@@ -129,6 +163,7 @@ async function startToday(reason = "manual") {
   const action = reason === "alarm"
     ? "已到设定时间，正在开始今天的任务"
     : (reason === "catchup" ? "正在补做今天的任务" : "开始今日任务");
+  const startPoints = A.readablePoints(store[KEYS.pointsBalance]);
   await chrome.storage.local.set({
     [KEYS.autoSearchLock]: "on",
     [KEYS.globalMasterTabId]: "",
@@ -145,8 +180,10 @@ async function startToday(reason = "manual") {
     [KEYS.waitingUserTask]: null,
     [KEYS.productState]: "running",
     [KEYS.runStartedAt]: Date.now(),
+    [KEYS.runStartPoints]: startPoints,
     [KEYS.lastStatusMessage]: action,
-    [KEYS.runLogs]: withLog(store, { action })
+    [KEYS.runLogs]: withLog(store, { action }),
+    ...clearRunFlags()
   });
 
   await openOrWakeSearchTab();
@@ -161,9 +198,93 @@ async function stopToday(message = "已停止") {
     [KEYS.productState]: "ready",
     [KEYS.waitingUserTask]: null,
     [KEYS.lastStatusMessage]: message,
-    [KEYS.runLogs]: withLog(store, { action: "已停止", result: message })
+    [KEYS.runLogs]: withLog(store, { action: "已停止", result: message }),
+    ...clearRunFlags()
   });
   await updateBadge();
+  return { ok: true };
+}
+
+async function pauseToday(reason = A.PAUSE_REASONS.USER, message) {
+  const store = await readStore();
+  if (!A.isLockOn(store)) {
+    return { ok: false, error: "还没有开始今天的任务" };
+  }
+  const pauseReason = reason === A.PAUSE_REASONS.BUSY ? A.PAUSE_REASONS.BUSY : A.PAUSE_REASONS.USER;
+  if (store[KEYS.paused] === true && store[KEYS.pauseReason] === pauseReason) {
+    return { ok: true };
+  }
+  if (pauseReason === A.PAUSE_REASONS.BUSY && store[KEYS.paused] === true && store[KEYS.pauseReason] === A.PAUSE_REASONS.USER) {
+    return { ok: true };
+  }
+  const status = message || A.pauseStatusText(pauseReason);
+  const patch = {
+    [KEYS.paused]: true,
+    [KEYS.pauseReason]: pauseReason,
+    [KEYS.productState]: "paused",
+    [KEYS.lastStatusMessage]: status
+  };
+  if (pauseReason === A.PAUSE_REASONS.USER) {
+    patch[KEYS.runLogs] = withLog(store, { action: "已暂停", result: status });
+  }
+  await chrome.storage.local.set(patch);
+  await updateBadge();
+  return { ok: true };
+}
+
+async function resumeToday(options = {}) {
+  const store = await readStore();
+  if (!A.isLockOn(store)) {
+    return startToday("manual");
+  }
+  const ignoreBusyMs = options.ignoreBusyMs != null ? Number(options.ignoreBusyMs) : 8000;
+  await chrome.storage.local.set({
+    [KEYS.paused]: false,
+    [KEYS.pauseReason]: "",
+    [KEYS.productState]: "running",
+    [KEYS.ignoreBusyUntil]: Date.now() + Math.max(0, ignoreBusyMs),
+    [KEYS.lastStatusMessage]: "继续今天的任务",
+    [KEYS.runLogs]: options.silent ? store[KEYS.runLogs] : withLog(store, { action: "继续今天的任务" })
+  });
+  await updateBadge();
+  return { ok: true };
+}
+
+async function skipWaitingTask() {
+  const store = await readStore();
+  const waiting = store[KEYS.waitingUserTask];
+  if (!waiting || !waiting.url) return { ok: false, error: "现在没有需要你点的活动" };
+  const taskList = A.readTaskList(store);
+  const cards = taskList.cards.map((card) => (
+    card.url === waiting.url
+      ? { ...card, status: A.TASK_STATUS.SKIPPED, reason: "你跳过了这张", updatedAt: Date.now() }
+      : card
+  ));
+  await chrome.storage.local.set({
+    [KEYS.taskList]: { date: taskList.date, cards },
+    [KEYS.waitingUserTask]: null,
+    [KEYS.userTaskAction]: "",
+    [KEYS.userTaskConfirmTries]: 0,
+    [KEYS.lastStatusMessage]: `已跳过「${waiting.name || "这张活动"}」`,
+    [KEYS.runLogs]: withLog(store, {
+      action: `跳过「${waiting.name || "这张活动"}」`,
+      result: "已跳过",
+      reason: "你跳过了这张"
+    })
+  });
+  return { ok: true };
+}
+
+async function confirmWaitingTask() {
+  const store = await readStore();
+  const waiting = store[KEYS.waitingUserTask];
+  if (!waiting || !waiting.url) return { ok: false, error: "现在没有需要你点的活动" };
+  await chrome.storage.local.set({
+    [KEYS.userTaskAction]: "done",
+    [KEYS.userTaskConfirmTries]: 0,
+    [KEYS.lastStatusMessage]: `正在确认「${waiting.name || "这张活动"}」是否完成`
+  });
+  await openOrWakeRewardsTab();
   return { ok: true };
 }
 
@@ -177,9 +298,11 @@ async function startDailyRun(reason = "alarm") {
     KEYS.loginState,
     KEYS.enableDailyTasks,
     KEYS.todayGoal,
+    KEYS.repeatRule,
     A.dailyTasksDoneKey(now)
   ]);
   if (store[KEYS.riskAccepted] !== true) return;
+  if (!A.isScheduledDay(now, store[KEYS.repeatRule])) return;
   const alreadyTriggered = store[A.triggeredKey(now)] === "true" || store[A.triggeredKey(now)] === true;
   const count = Number(store[A.dailyCountKey(now)] ?? 0);
   const limit = Number(store[KEYS.limitSearchCount] ?? A.DEFAULT_SEARCH_LIMIT);
@@ -203,6 +326,7 @@ async function catchUpIfNeeded() {
   const schedule = await readSchedule();
   if (!schedule.enabled) return;
   const now = new Date();
+  if (!A.isScheduledDay(now, schedule.rule)) return;
   const scheduledToday = new Date(now);
   scheduledToday.setHours(schedule.hour, schedule.minute, 0, 0);
   if (now.getTime() < scheduledToday.getTime()) return;
@@ -249,7 +373,7 @@ chrome.notifications.onClicked.addListener((id) => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
-  if (changes[KEYS.autoStartHour] || changes[KEYS.autoStartMin]) {
+  if (changes[KEYS.autoStartHour] || changes[KEYS.autoStartMin] || changes[KEYS.repeatRule]) {
     void scheduleNextAlarm();
   }
   void updateBadge();
@@ -265,12 +389,32 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     openOrWakeSearchTab().then(() => sendResponse({ ok: true }));
     return true;
   }
+  if (type === "OPEN_REWARDS") {
+    openOrWakeRewardsTab().then(() => sendResponse({ ok: true }));
+    return true;
+  }
   if (type === "START_TODAY") {
     startToday("manual").then(sendResponse);
     return true;
   }
   if (type === "STOP_TODAY") {
     stopToday("已停止").then(sendResponse);
+    return true;
+  }
+  if (type === "PAUSE_TODAY") {
+    pauseToday(message.reason || A.PAUSE_REASONS.USER, message.message).then(sendResponse);
+    return true;
+  }
+  if (type === "RESUME_TODAY") {
+    resumeToday({ silent: message.silent === true, ignoreBusyMs: message.ignoreBusyMs }).then(sendResponse);
+    return true;
+  }
+  if (type === "USER_TASK_SKIP") {
+    skipWaitingTask().then(sendResponse);
+    return true;
+  }
+  if (type === "USER_TASK_DONE") {
+    confirmWaitingTask().then(sendResponse);
     return true;
   }
   if (type === "SET_TODAY_GOAL") {
@@ -327,13 +471,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const limit = Number(message.limit || A.DEFAULT_SEARCH_LIMIT);
     const startedAt = Number(message.startedAt || 0);
     const durationMs = startedAt > 0 ? Date.now() - startedAt : 0;
-    const summary = { reason, reasonCode, count, limit, durationMs, at: Date.now() };
     readStore().then((store) => {
       const copy = A.failCopy(reasonCode, {
         limit: A.readNumber(store, KEYS.maxNoGainLimit, A.DEFAULT_NO_GAIN_LIMIT),
         message: message.message || "",
         duringRun: reasonCode === A.FAIL_CODES.LOGIN,
         where: message.where
+      });
+      const summary = A.buildTodaySummary(store, {
+        reason,
+        reasonCode,
+        count,
+        limit,
+        durationMs,
+        at: Date.now()
       });
       const patch = {
         [KEYS.lastRunSummary]: summary,
@@ -342,14 +493,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         [KEYS.waitingUserTask]: null,
         [KEYS.runLogs]: withLog(store, {
           action: reason === "complete" ? "今天的任务已完成" : "已停止",
-          result: message.message || copy.message,
+          result: message.message || copy.message || summary.closingLine,
           reasonCode
-        })
+        }),
+        ...clearRunFlags()
       };
       if (reason === "complete") {
         patch[KEYS.productState] = "complete";
         patch[KEYS.failReasonCode] = "";
-        void notify("bing-assistant-complete", `今日电脑搜索 ${count}/${limit}，用时 ${A.formatDuration(durationMs)}`);
+        void notify("bing-assistant-complete", A.formatCompleteNotify(summary));
       } else if (reason === "failed") {
         patch[KEYS.productState] = "failed";
         patch[KEYS.failReasonCode] = reasonCode;

@@ -20,6 +20,11 @@ const dailyRetries = document.getElementById("daily-retries");
 const catchupEnabled = document.getElementById("catchup-enabled");
 const catchupAsk = document.getElementById("catchup-ask");
 const mobileEnabled = document.getElementById("mobile-enabled");
+const repeatRule = document.getElementById("repeat-rule");
+const intervalMin = document.getElementById("interval-min");
+const intervalMax = document.getElementById("interval-max");
+const simulateTyping = document.getElementById("simulate-typing");
+const pauseWhenBusy = document.getElementById("pause-when-busy");
 
 function send(type, extra = {}) {
   return chrome.runtime.sendMessage({ type, ...extra });
@@ -68,6 +73,11 @@ function fill(store) {
   catchupEnabled.checked = model.catchUpEnabled;
   catchupAsk.checked = model.catchUpAsk;
   mobileEnabled.checked = model.mobileEnabled;
+  repeatRule.value = model.repeatRule;
+  intervalMin.value = String(model.intervalMin);
+  intervalMax.value = String(model.intervalMax);
+  simulateTyping.checked = model.simulateTyping;
+  pauseWhenBusy.checked = model.pauseWhenBusy;
   mobileQuota.textContent = model.mobileEnabled
     ? `${model.mobileCount}/${model.mobileLimit}（执行未启用）`
     : "未启用";
@@ -107,6 +117,22 @@ scheduleEnabled.addEventListener("change", async () => {
     [A.triggeredKey()]: "false"
   });
 });
+
+repeatRule.addEventListener("change", () => save({ [A.KEYS.repeatRule]: A.normalizeRepeatRule(repeatRule.value) }));
+
+function saveIntervalRange() {
+  const range = A.normalizeIntervalRange(intervalMin.value, intervalMax.value);
+  intervalMin.value = String(range.min);
+  intervalMax.value = String(range.max);
+  return save({
+    [A.KEYS.searchIntervalMin]: range.min,
+    [A.KEYS.searchIntervalMax]: range.max
+  });
+}
+intervalMin.addEventListener("change", () => void saveIntervalRange());
+intervalMax.addEventListener("change", () => void saveIntervalRange());
+simulateTyping.addEventListener("change", () => save({ [A.KEYS.simulateTyping]: simulateTyping.checked }));
+pauseWhenBusy.addEventListener("change", () => save({ [A.KEYS.pauseWhenBusy]: pauseWhenBusy.checked }));
 
 scheduleTime.addEventListener("change", async () => {
   if (!scheduleEnabled.checked) {

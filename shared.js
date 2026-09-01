@@ -10,6 +10,11 @@ const BingAssistant = (() => {
   const DEFAULT_MOBILE_LIMIT = 20;
   const SUGGESTED_HOUR = 21;
   const SUGGESTED_MINUTE = 30;
+  const MIN_SEARCH_INTERVAL = 8;
+  const MAX_SEARCH_INTERVAL = 60;
+  const DEFAULT_INTERVAL_MIN = 8;
+  const DEFAULT_INTERVAL_MAX = 14;
+  const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
   const WORD_PACK_SHORT = "日常短词";
   const WORD_PACK_LONG = "生活长尾";
   const WORD_PACK_CUSTOM = "自定义";
@@ -26,6 +31,23 @@ const BingAssistant = (() => {
     search_only: "只搜满",
     search_safe: "搜满 + 安全任务",
     try_all: "尽量全做"
+  };
+
+  const REPEAT = {
+    DAILY: "daily",
+    WEEKDAYS: "weekdays",
+    WEEKENDS: "weekends"
+  };
+
+  const REPEAT_LABELS = {
+    daily: "每天",
+    weekdays: "仅工作日",
+    weekends: "仅周末"
+  };
+
+  const PAUSE_REASONS = {
+    USER: "user",
+    BUSY: "busy"
   };
 
   const FAIL_CODES = {
@@ -111,7 +133,18 @@ const BingAssistant = (() => {
     mobileSearchLimit: "Rebang_MobileSearchLimit",
     catchUpEnabled: "Rebang_CatchUpEnabled",
     catchUpAsk: "Rebang_CatchUpAsk",
-    quizAssistEnabled: "Rebang_QuizAssistEnabled"
+    quizAssistEnabled: "Rebang_QuizAssistEnabled",
+    paused: "Rebang_Paused",
+    pauseReason: "Rebang_PauseReason",
+    searchIntervalMin: "Rebang_SearchIntervalMin",
+    searchIntervalMax: "Rebang_SearchIntervalMax",
+    simulateTyping: "Rebang_SimulateTyping",
+    pauseWhenBusy: "Rebang_PauseWhenBusy",
+    repeatRule: "Rebang_RepeatRule",
+    runStartPoints: "Rebang_RunStartPoints",
+    userTaskAction: "Rebang_UserTaskAction",
+    userTaskConfirmTries: "Rebang_UserTaskConfirmTries",
+    ignoreBusyUntil: "Rebang_IgnoreBusyUntil"
   };
 
   const SHORT_KEYWORD_POOL = [
@@ -178,11 +211,16 @@ const BingAssistant = (() => {
     return { enabled, hour: enabled ? hour : -1, minute: enabled ? minute : -1 };
   }
 
-  function nextScheduledTime(hour, minute, now = new Date()) {
+  function nextScheduledTime(hour, minute, now = new Date(), rule = REPEAT.DAILY) {
     const next = new Date(now);
     next.setHours(hour, minute, 0, 0);
     if (next.getTime() <= now.getTime()) {
       next.setDate(next.getDate() + 1);
+    }
+    let guard = 0;
+    while (!isScheduledDay(next, rule) && guard < 8) {
+      next.setDate(next.getDate() + 1);
+      guard += 1;
     }
     return next;
   }
@@ -191,14 +229,77 @@ const BingAssistant = (() => {
     return `${pad2(hour)}:${pad2(minute)}`;
   }
 
-  function formatNextRunLabel(hour, minute, now = new Date()) {
+  function formatNextRunLabel(hour, minute, now = new Date(), rule = REPEAT.DAILY) {
     const schedule = parseHourMinute(hour, minute);
     if (!schedule.enabled) return "未设置";
-    const next = nextScheduledTime(schedule.hour, schedule.minute, now);
+    const next = nextScheduledTime(schedule.hour, schedule.minute, now, rule);
     const today = localDateString(now);
     const nextDay = localDateString(next);
-    const when = nextDay === today ? "今天" : "明天";
-    return `${when} ${formatClock(schedule.hour, schedule.minute)}`;
+    const clock = formatClock(schedule.hour, schedule.minute);
+    if (nextDay === today) return `今天 ${clock}`;
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    if (nextDay === localDateString(tomorrow)) return `明天 ${clock}`;
+    return `${WEEKDAY_NAMES[next.getDay()] || "下次"} ${clock}`;
+  }
+
+  function normalizeRepeatRule(value) {
+    if (value === REPEAT.WEEKDAYS || value === REPEAT.WEEKENDS) return value;
+    return REPEAT.DAILY;
+  }
+
+  function isScheduledDay(date = new Date(), rule = REPEAT.DAILY) {
+    const day = date.getDay();
+    const normalized = normalizeRepeatRule(rule);
+    if (normalized === REPEAT.WEEKDAYS) return day >= 1 && day <= 5;
+    if (normalized === REPEAT.WEEKENDS) return day === 0 || day === 6;
+    return true;
+  }
+
+  function normalizeIntervalRange(minValue, maxValue) {
+    let min = Number(minValue);
+    let max = Number(maxValue);
+    if (!Number.isFinite(min)) min = DEFAULT_INTERVAL_MIN;
+    if (!Number.isFinite(max)) max = DEFAULT_INTERVAL_MAX;
+    min = Math.round(min);
+    max = Math.round(max);
+    min = Math.min(MAX_SEARCH_INTERVAL, Math.max(MIN_SEARCH_INTERVAL, min));
+    max = Math.min(MAX_SEARCH_INTERVAL, Math.max(MIN_SEARCH_INTERVAL, max));
+    if (min > max) {
+      const swap = min;
+      min = max;
+      max = swap;
+    }
+    return { min, max };
+  }
+
+  function randomSearchDelayMs(minValue, maxValue) {
+    const range = normalizeIntervalRange(minValue, maxValue);
+    const minMs = range.min * 1000;
+    const maxMs = range.max * 1000;
+    return minMs + Math.floor(Math.random() * (maxMs - minMs + 1));
+  }
+
+  function isPaused(store) {
+    return store && store[KEYS.paused] === true && isLockOn(store);
+  }
+
+  function pauseStatusText(reason) {
+    if (reason === PAUSE_REASONS.BUSY) return "你正在用电脑，已暂时停下";
+    return "已暂停";
+  }
+
+  function readablePoints(value) {
+    const points = Number(value);
+    return Number.isFinite(points) ? points : null;
+  }
+
+  function pointsGainedFrom(store) {
+    const start = readablePoints(store && store[KEYS.runStartPoints]);
+    const end = readablePoints(store && store[KEYS.pointsBalance]);
+    if (start === null || end === null) return null;
+    const gained = end - start;
+    return gained > 0 ? gained : null;
   }
 
   function formatDuration(ms) {
@@ -447,6 +548,71 @@ const BingAssistant = (() => {
     return `${autoDone}/${autoTotal} 可自动 · ${manual} 需手动`;
   }
 
+  function formatDailyResult(summary, dailyEnabled) {
+    if (!dailyEnabled) return "未开启（安全模式）";
+    if (!summary || summary.total === 0) return "未识别到活动";
+    const bits = [`已完成 ${summary.done || 0} 张`];
+    if (summary.skipped) bits.push(`跳过 ${summary.skipped} 张`);
+    if (summary.manual) bits.push(`还需手动 ${summary.manual} 张`);
+    return bits.join(" · ");
+  }
+
+  function formatClosingLine(extra = {}) {
+    if (!extra.dailyEnabled) return "安全模式已开，未处理每日活动";
+    const summary = extra.dailySummary || {};
+    const manual = summary.manual || 0;
+    const skipped = summary.skipped || 0;
+    if (manual > 0) return `还有 ${manual} 个活动需要你点一下`;
+    if (extra.dailyDone || autoPendingSafe(summary) === 0) {
+      return skipped > 0 ? `每日活动已处理，跳过 ${skipped} 张` : "每日活动已处理";
+    }
+    return "每日活动仍待处理";
+  }
+
+  function buildTodaySummary(store, extra = {}, now = new Date()) {
+    const count = extra.count != null ? Number(extra.count) : readNumber(store, dailyCountKey(now), 0);
+    const limit = extra.limit != null ? Number(extra.limit) : Math.max(1, readNumber(store, KEYS.limitSearchCount, DEFAULT_SEARCH_LIMIT));
+    const durationMs = extra.durationMs != null ? Number(extra.durationMs) : 0;
+    const reason = extra.reason || "stopped";
+    const reasonCode = extra.reasonCode || "";
+    const dailySummary = extra.dailySummary || summarizeTasks(readTaskList(store, now).cards);
+    const goal = normalizeGoal(store);
+    const dailyEnabled = extra.dailyEnabled != null ? extra.dailyEnabled : goalEnablesDaily(goal);
+    const dailyDone = extra.dailyDone != null
+      ? extra.dailyDone
+      : (store[dailyTasksDoneKey(now)] === true || store[dailyTasksDoneKey(now)] === "true");
+    const pointsGained = extra.pointsGained != null ? extra.pointsGained : pointsGainedFrom(store);
+    const closingLine = extra.closingLine || formatClosingLine({
+      dailyEnabled,
+      dailyDone,
+      dailySummary
+    });
+    return {
+      reason,
+      reasonCode,
+      count,
+      limit,
+      durationMs,
+      at: extra.at || Date.now(),
+      dailyEnabled,
+      dailyDone,
+      dailySummary,
+      pointsGained,
+      closingLine
+    };
+  }
+
+  function formatCompleteNotify(summary) {
+    if (!summary) return "今天的任务已完成";
+    const parts = [`今日电脑搜索 ${summary.count}/${summary.limit}`];
+    if (summary.dailyEnabled && summary.dailySummary) {
+      parts.push(`每日活动完成 ${summary.dailySummary.done || 0} 张、跳过 ${summary.dailySummary.skipped || 0} 张`);
+    }
+    if (summary.durationMs) parts.push(`用时 ${formatDuration(summary.durationMs)}`);
+    if (summary.pointsGained) parts.push(`大约 +${summary.pointsGained}`);
+    return parts.join("，");
+  }
+
   function autoPendingSafe(summary) {
     return summary && Number(summary.autoPending) > 0 ? Number(summary.autoPending) : 0;
   }
@@ -502,7 +668,11 @@ const BingAssistant = (() => {
     const riskAccepted = store[KEYS.riskAccepted] === true;
     const notifyEnabled = store[KEYS.notifyEnabled] !== false;
     const schedule = parseHourMinute(store[KEYS.autoStartHour], store[KEYS.autoStartMin]);
+    const repeatRule = normalizeRepeatRule(store[KEYS.repeatRule]);
+    const interval = normalizeIntervalRange(store[KEYS.searchIntervalMin], store[KEYS.searchIntervalMax]);
     const startedAt = readNumber(store, KEYS.runStartedAt, 0);
+    const paused = isPaused(store);
+    const pauseReason = store[KEYS.pauseReason] || "";
     const keyword = store[KEYS.lastKeyword] || "";
     const statusMessage = store[KEYS.lastStatusMessage] || "";
     const lastError = store[KEYS.lastError] || "";
@@ -528,6 +698,7 @@ const BingAssistant = (() => {
     let state = "ready";
     if (!riskAccepted) state = "onboarding";
     else if (loginState === "out") state = "logged_out";
+    else if (paused) state = "paused";
     else if (running) state = "running";
     else if (productState === "failed" && (count < limit || (dailyEnabled && !dailyDone))) state = "failed";
     else if (count >= limit && (!dailyEnabled || dailyDone || (dailySummary.total > 0 && dailySummary.autoPending === 0))) state = "complete";
@@ -542,6 +713,9 @@ const BingAssistant = (() => {
       notifyEnabled,
       loginState,
       running,
+      paused,
+      pauseReason,
+      pauseText: pauseStatusText(pauseReason),
       count,
       limit,
       goal,
@@ -550,10 +724,23 @@ const BingAssistant = (() => {
       dailyDone,
       dailySummary,
       dailyProgress: formatDailyProgress(dailySummary, dailyEnabled, dailyDone),
+      dailyResult: formatDailyResult(dailySummary, dailyEnabled),
       taskCards: taskList.cards,
       waitingTask,
-      schedule,
-      nextRunLabel: formatNextRunLabel(store[KEYS.autoStartHour], store[KEYS.autoStartMin], now),
+      schedule: { ...schedule, rule: repeatRule },
+      repeatRule,
+      repeatLabel: REPEAT_LABELS[repeatRule] || REPEAT_LABELS.daily,
+      nextRunLabel: formatNextRunLabel(store[KEYS.autoStartHour], store[KEYS.autoStartMin], now, repeatRule),
+      intervalMin: interval.min,
+      intervalMax: interval.max,
+      simulateTyping: store[KEYS.simulateTyping] === true,
+      pauseWhenBusy: store[KEYS.pauseWhenBusy] !== false,
+      pointsGained: summary && summary.pointsGained != null ? summary.pointsGained : pointsGainedFrom(store),
+      closingLine: summary && summary.closingLine ? summary.closingLine : formatClosingLine({
+        dailyEnabled,
+        dailyDone,
+        dailySummary
+      }),
       keyword,
       statusMessage,
       lastError,
@@ -598,6 +785,11 @@ const BingAssistant = (() => {
     DEFAULT_MOBILE_LIMIT,
     SUGGESTED_HOUR,
     SUGGESTED_MINUTE,
+    MIN_SEARCH_INTERVAL,
+    MAX_SEARCH_INTERVAL,
+    DEFAULT_INTERVAL_MIN,
+    DEFAULT_INTERVAL_MAX,
+    WEEKDAY_NAMES,
     WORD_PACK_SHORT,
     WORD_PACK_LONG,
     WORD_PACK_CUSTOM,
@@ -605,6 +797,9 @@ const BingAssistant = (() => {
     KEYWORD_NOTE,
     GOALS,
     GOAL_LABELS,
+    REPEAT,
+    REPEAT_LABELS,
+    PAUSE_REASONS,
     FAIL_CODES,
     TASK_STATUS,
     TASK_KIND,
@@ -625,6 +820,14 @@ const BingAssistant = (() => {
     formatDuration,
     readNumber,
     isLockOn,
+    isPaused,
+    normalizeRepeatRule,
+    isScheduledDay,
+    normalizeIntervalRange,
+    randomSearchDelayMs,
+    pauseStatusText,
+    readablePoints,
+    pointsGainedFrom,
     normalizeWordPack,
     normalizeGoal,
     goalEnablesDaily,
@@ -637,6 +840,10 @@ const BingAssistant = (() => {
     taskStatusLabel,
     summarizeTasks,
     formatDailyProgress,
+    formatDailyResult,
+    formatClosingLine,
+    buildTodaySummary,
+    formatCompleteNotify,
     appendRunLog,
     formatLogLine,
     todayLogs,

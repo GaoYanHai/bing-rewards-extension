@@ -134,3 +134,6 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   margin-bottom: 12px;
 }
 .danger .help { margin: 0 0 12px; }
+
+#interval-min, #interval-max { min-width: 72px; width: 72px; }
+#repeat-rule { min-width: 120px; }

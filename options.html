@@ -19,10 +19,15 @@
     <section>
       <h2>基础设置</h2>
       <label class="row">
-        <span>每天自动开始</span>
+        <span>自动开始</span>
         <span class="inline">
           <input type="checkbox" id="schedule-enabled">
           <input type="time" id="schedule-time">
+          <select id="repeat-rule">
+            <option value="daily">每天</option>
+            <option value="weekdays">仅工作日</option>
+            <option value="weekends">仅周末</option>
+          </select>
         </span>
       </label>
       <p id="next-run" class="help">下次启动：未设置</p>
@@ -96,6 +101,25 @@
     <section>
       <h2>高级设置</h2>
       <label class="row">
+        <span>搜索间隔（秒）</span>
+        <span class="inline">
+          <input type="number" id="interval-min" min="8" max="60" step="1">
+          <span>到</span>
+          <input type="number" id="interval-max" min="8" max="60" step="1">
+        </span>
+      </label>
+      <p class="help">默认 8-14 秒。不能短于 8 秒，以免太像机器连点。</p>
+      <label class="row">
+        <span>模拟输入</span>
+        <input type="checkbox" id="simulate-typing">
+      </label>
+      <p class="help">打开后会在搜索框里逐字输入再搜索。找不到搜索框时才会跳转链接。</p>
+      <label class="row">
+        <span>我在用电脑时先暂停</span>
+        <input type="checkbox" id="pause-when-busy" checked>
+      </label>
+      <p class="help">当前窗口全屏，或正在输入时会先停下，条件消失后自动继续。</p>
+      <label class="row">
         <span>连续没有积分时停止</span>
         <input type="number" id="no-gain-limit" min="3" max="30" step="1">
       </label>
@@ -111,7 +135,6 @@
         <span>补做前先问我一声</span>
         <input type="checkbox" id="catchup-ask">
       </label>
-      <p class="help">搜索间隔固定为 8-14 秒，用来更接近常规搜索，不建议改得更短。</p>
     </section>
 
     <section class="danger">
@@ -121,12 +144,12 @@
           <span>启用移动搜索配额展示</span>
           <input type="checkbox" id="mobile-enabled">
         </label>
-        <p class="help">1.2 只展示配额，不会改 User-Agent，也不会真的做移动搜索。</p>
+        <p class="help">1.3 只展示配额，不会改 User-Agent，也不会真的做移动搜索。</p>
         <label class="row">
           <span>自动处理测验</span>
           <input type="checkbox" id="quiz-assist" disabled>
         </label>
-        <p class="help">1.2 不会自动作答测验，只会提示你点一下。</p>
+        <p class="help">暂不自动作答。1.3 仍然只会提示你点一下。</p>
         <label class="stack">
           <span>自定义 User-Agent</span>
           <input type="text" id="custom-ua" disabled placeholder="暂不支持">
