@@ -226,6 +226,11 @@ footer {
 .week-cell.complete .week-dot { background: var(--ok); }
 .week-cell.failed .week-dot { background: var(--danger); }
 .week-cell.incomplete .week-dot { background: #c8c6c4; }
+.week-cell.empty .week-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px #c8c6c4;
+}
+.week-cell.empty { background: transparent; }
 .week-cell.today {
   outline: 1px solid var(--accent);
   color: var(--fg);

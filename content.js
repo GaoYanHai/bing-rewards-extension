@@ -401,6 +401,61 @@ GM_addStyle(`
     .b_dark .rebang-status-card #ex-user-msg, .b_dark .rebang-section-head > span, .b_dark .keyword-link { color: #f3f2f1; }
     .b_dark .keyword-link em { background: #3b3a39; color: #c8c6c4; }
     .b_dark .keyword-link-current { background: #1b3a52 !important; color: #4cc2ff !important; }
+    #ext-task-list {
+        margin: 0;
+        max-height: 220px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .rebang-task {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 7px 8px;
+        border-radius: 8px;
+        background: #f7f7f5;
+        font-size: 13px;
+        color: #201f1e;
+        border-bottom: 0;
+    }
+    .rebang-task b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rebang-task span {
+        color: #8a8886;
+        font-size: 11px;
+        white-space: nowrap;
+    }
+    .rebang-task.is-current {
+        background: #e8f4fd;
+        box-shadow: inset 0 0 0 1px rgba(0,120,212,0.25);
+    }
+    #ext-user-task-actions {
+        display: none;
+        gap: 8px;
+        margin: 0;
+    }
+    #ext-user-task-actions.is-on { display: flex; }
+    #ext-user-task-actions button,
+    #ext-confirm-user-task,
+    #ext-skip-user-task {
+        height: auto;
+        padding: 0;
+        margin: 0;
+        background: none;
+        color: #0078d4;
+        border: 0;
+        font-size: 12px;
+        cursor: pointer;
+    }
+    #ext-user-task-actions button:hover { text-decoration: underline; }
+    @media (prefers-color-scheme: dark) {
+        .rebang-task { background: #2b2a29; color: #f3f2f1; }
+        .rebang-task span { color: #c8c6c4; }
+        .rebang-task.is-current { background: #1b3a52; }
+    }
+    .b_dark .rebang-task { background: #2b2a29; color: #f3f2f1; }
+    .b_dark .rebang-task.is-current { background: #1b3a52; }
 `);
 
 // 修复：不使用 this（严格模式下 this 为 undefined 会崩溃）
@@ -464,9 +519,7 @@ function rememberStartPoints(points) {
 
 function setUserTaskButtons(visible) {
     const box = $("#ext-user-task-actions");
-    if (box.length) box.toggle(!!visible);
-    $("#ext-confirm-user-task").toggle(!!visible);
-    $("#ext-skip-user-task").toggle(!!visible);
+    if (box.length) box.toggleClass("is-on", !!visible);
 }
 
 document.addEventListener("keydown", (event) => {
@@ -756,16 +809,7 @@ function initAntiSleepProtection() {
 
         // 检测是否发生过"时间跳跃"（即页面被挂起）
         if (timeDiff > freezeThreshold) {
-            console.warn(`[Rebang] ⚠️ 检测到页面曾被冻结 ${timeDiff / 1000}秒！`);
-            console.warn(`[Rebang] 正在执行"热重启"以恢复脚本活性...`);
-            window.location.reload();
-        }
-
-        // 3. 动态标题微扰 (防止Chrome强行休眠后台Tab)
-        if (document.hidden && getVal(autoSearchLockKey, "off") === "on") {
-             const title = document.title;
-             if (title.endsWith(".")) document.title = title.slice(0, -1);
-             else document.title = title + ".";
+            console.warn(`[Rebang] 页面曾暂停 ${timeDiff / 1000}秒，已继续等待，不刷新当前页。`);
         }
 
         lastHeartbeat = now;
@@ -1009,8 +1053,14 @@ function updateMiniBar() {
   const running = getVal(autoSearchLockKey, "off") === "on";
   const paused = isRunPaused();
   const model = BingAssistant.buildViewModel(rebangExtensionStore);
-  $("#rebang-mini-progress").text(`电脑搜索 ${count}/${limit}`);
-  $("#ext-task-summary").text(`每日活动 ${model.dailyProgress}`);
+  const onRewards = location.hostname === "rewards.bing.com";
+  if (onRewards) {
+    $("#rebang-mini-progress").text("每日活动");
+    $("#ext-task-summary").text(`每日活动 ${model.dailyProgress}`);
+  } else {
+    $("#rebang-mini-progress").text(`电脑搜索 ${count}/${limit}`);
+    $("#ext-task-summary").text(`每日活动 ${model.dailyProgress}`);
+  }
   $("#ext-current-count").text(count);
   $("#rebang-dot").toggleClass("running", running && !paused);
   $("#rebang-dot").toggleClass("paused", paused);
@@ -1022,9 +1072,12 @@ function updateMiniBar() {
     $("#ext-autosearch-lock").text("开始").removeClass("stop");
   }
   const keyword = ($("#ext-current-keyword").text() || "").trim();
+  const waiting = getVal(BingAssistant.KEYS.waitingUserTask, null);
   if (paused) $("#rebang-mini-current").text("已暂停");
   else if (!running && model.state === "failed") $("#rebang-mini-current").text(model.failShort || "已停止");
   else if (!running && model.state === "complete") $("#rebang-mini-current").text("今天已完成");
+  else if (onRewards && waiting && waiting.name) $("#rebang-mini-current").text(waiting.name);
+  else if (onRewards) $("#rebang-mini-current").text(running ? (($("#ex-user-msg").text() || "").trim()) : "");
   else $("#rebang-mini-current").text(running && keyword && keyword !== "-" ? keyword : "");
   publishAssistantState();
 }
@@ -1192,9 +1245,14 @@ function dailyTasksWanted() {
     return BingAssistant.goalEnablesDaily(currentGoal());
 }
 
+function isQuizOrVotePage() {
+    return BingAssistant.isQuizOrVotePage(window.location, document);
+}
+
 function isRewardsDashboard() {
-    const path = (location.pathname || "/").replace(/\/+$/, "") || "/";
-    return path === "/" || path === "/dashboard" || path === "/welcome";
+    if (isQuizOrVotePage()) return false;
+    if (BingAssistant.isRewardsDashboardPath(location.pathname)) return true;
+    return $(BingAssistant.TASK_SELECTORS.dashboard).length > 0 && $(BingAssistant.TASK_SELECTORS.cards).length > 0;
 }
 
 function cardTitle($card, fallback) {
@@ -1268,8 +1326,10 @@ function renderTaskList(cards) {
         return;
     }
     box.empty();
+    const waiting = getVal(BingAssistant.KEYS.waitingUserTask, null);
     list.slice(0, 12).forEach((card) => {
-        box.append(`<div class="rebang-task">${escapeHtml(truncateText(card.name, 16))}<span>${escapeHtml(BingAssistant.taskStatusLabel(card))}</span></div>`);
+        const current = waiting && waiting.url === card.url ? " is-current" : "";
+        box.append(`<div class="rebang-task${current}"><b>${escapeHtml(truncateText(card.name, 16))}</b><span>${escapeHtml(BingAssistant.taskStatusLabel(card))}</span></div>`);
     });
 }
 
@@ -1301,6 +1361,17 @@ function pickNextTask(cards) {
         if (manualCard) return { card: manualCard, mode: "manual" };
     }
     return null;
+}
+
+let dashboardReturnTimer = 0;
+function returnToRewardsDashboard(msg) {
+    if (isRewardsDashboard()) return;
+    if (msg) showUserMessage(msg);
+    if (dashboardReturnTimer) return;
+    dashboardReturnTimer = setTimeout(() => {
+        dashboardReturnTimer = 0;
+        window.location.href = BingAssistant.REWARDS_URL;
+    }, 1200);
 }
 
 function finishDailyAndReturn(msg, logEvent) {
@@ -1371,16 +1442,79 @@ async function handleRewardsPage() {
         return;
     }
 
-    if (!cards.length && !isRewardsDashboard()) {
-        showUserMessage("正在返回每日活动清单");
-        setTimeout(() => { window.location.href = BingAssistant.REWARDS_URL; }, 1200);
-        return;
-    }
+    const storedCards = BingAssistant.readTaskList(rebangExtensionStore).cards;
+    const quizPage = isQuizOrVotePage();
 
     const userAction = getVal(BingAssistant.KEYS.userTaskAction, "");
     if (userAction === "skip") {
         setVal(BingAssistant.KEYS.userTaskAction, "");
         $("#ext-skip-user-task").click();
+        return;
+    }
+
+    if (quizPage) {
+        rewardsCardMissCount = 0;
+        let waitingNow = getVal(BingAssistant.KEYS.waitingUserTask, null);
+        if (!waitingNow || !waitingNow.url) {
+            try { waitingNow = JSON.parse(sessionStorage.getItem("Rebang_LastTask") || "null"); } catch (error) { waitingNow = null; }
+            if (waitingNow && waitingNow.url) {
+                setVal(BingAssistant.KEYS.waitingUserTask, {
+                    name: waitingNow.name || "测验",
+                    url: waitingNow.url,
+                    kind: waitingNow.kind || BingAssistant.TASK_KIND.QUIZ,
+                    reason: waitingNow.reason || "测验需要你点一下"
+                });
+            }
+        }
+        waitingNow = getVal(BingAssistant.KEYS.waitingUserTask, null);
+        if (isLocked === "on" && waitingNow && waitingNow.url && userAction === "done") {
+            let tries = Number(getVal(BingAssistant.KEYS.userTaskConfirmTries, 0)) + 1;
+            setVal(BingAssistant.KEYS.userTaskConfirmTries, tries);
+            const lastPts = Number(getVal(rewardsLastPointsKey, -1));
+            if (currentPoints !== null && lastPts !== -1 && currentPoints > lastPts) {
+                const updated = markCard(storedCards, waitingNow.url, BingAssistant.TASK_STATUS.DONE, `积分 +${currentPoints - lastPts}`);
+                saveTaskList(updated);
+                renderTaskList(updated);
+                setVal(BingAssistant.KEYS.waitingUserTask, null);
+                setVal(BingAssistant.KEYS.userTaskAction, "");
+                setVal(BingAssistant.KEYS.userTaskConfirmTries, 0);
+                setUserTaskButtons(false);
+                showUserMessage(`“${truncateText(waitingNow.name, 10)}”已得分，正在返回清单`, { action: `“${waitingNow.name}”`, result: "已完成" });
+                returnToRewardsDashboard();
+                return;
+            }
+            if (tries >= 3) {
+                setVal(BingAssistant.KEYS.userTaskAction, "");
+                showUserMessage("还没看到这张完成。确认点完后再试，或跳过这张。");
+                setUserTaskButtons(true);
+                return;
+            }
+            showUserMessage("正在确认你刚才点的活动是否完成...");
+            setUserTaskButtons(true);
+            return;
+        }
+        if (isLocked !== "on") {
+            showUserMessage("这是测验页。开始今日任务后，可以在这里确认或跳过。");
+            setUserTaskButtons(false);
+            return;
+        }
+        if (isRunPaused() && userAction !== "done") {
+            showUserMessage(waitingNow && waitingNow.name
+                ? `需要你点一下：${waitingNow.name}`
+                : BingAssistant.pauseStatusText(getVal(BingAssistant.KEYS.pauseReason, "")));
+            setUserTaskButtons(!!(waitingNow && waitingNow.url));
+            return;
+        }
+        showUserMessage(waitingNow && waitingNow.name
+            ? `这是测验页：${waitingNow.name}。请自己作答，然后点「我点完了」或「跳过这张」。`
+            : "这是测验页。请自己作答，然后点「我点完了」或「跳过这张」。");
+        setUserTaskButtons(true);
+        return;
+    }
+
+    if (!cards.length && !isRewardsDashboard()) {
+        showUserMessage("正在返回每日活动清单");
+        returnToRewardsDashboard();
         return;
     }
 
@@ -1445,6 +1579,7 @@ async function handleRewardsPage() {
             return;
         }
     }
+
     setUserTaskButtons(false);
 
     if (await maybeHandleBusyPause()) {
@@ -1906,9 +2041,17 @@ function checkAutoStart() {
     let currentDate = getLocalDateStr();
     let lastCheckDate = GM_getValue("Rebang_LastCheckDate", currentDate);
     if (currentDate !== lastCheckDate) {
-        console.log(`[Rebang] 检测到日期变更 (${lastCheckDate} -> ${currentDate})，执行跨天刷新...`);
+        console.log(`[Rebang] 日期变更 (${lastCheckDate} -> ${currentDate})，重算今日状态`);
         GM_setValue("Rebang_LastCheckDate", currentDate);
-        location.reload();
+        try {
+            sessionStorage.removeItem("Rebang_SessionClicked");
+            sessionStorage.removeItem("Rebang_LastTask");
+            sessionStorage.removeItem("Rebang_LoggedSkip");
+        } catch (error) {}
+        if (typeof initKeywords === "function" && $("#ext-keywords-list").length) initKeywords();
+        if (typeof renderTaskListFromStore === "function") renderTaskListFromStore();
+        if (typeof updateMiniBar === "function") updateMiniBar();
+        if (typeof publishAssistantState === "function") publishAssistantState();
         return;
     }
 
@@ -1954,22 +2097,30 @@ function initRewardsControls() {
     const widgetHtml = `
     <div id="rebang-widget">
         <div id="rebang-header">
-            <span id="rebang-dot" class="status-dot running"></span>
-            <span id="rebang-title">每日活动</span>
+            <span id="rebang-dot" class="status-dot"></span>
+            <span id="rebang-title">Bing 积分助手</span>
             <span id="rebang-mini-progress">每日活动</span>
+            <span id="rebang-mini-current"></span>
             <button id="ext-stop-rewards" class="rebang-btn stop" type="button">停止</button>
-            <span id="rebang-toggle-icon" class="rebang-btn-icon" title="展开">−</span>
+            <span id="rebang-toggle-icon" class="rebang-btn-icon" title="展开">+</span>
         </div>
         <div id="rebang-body">
-            <div class="control-row">当前积分：<span id="ext-rewards-points">--</span></div>
-            <div id="ext-task-summary">每日活动 待识别</div>
-            <label id="ex-user-msg">正在读取每日活动</label>
-            <div id="ext-task-list"></div>
-            <div id="ext-user-task-actions" style="display:none">
-                <button id="ext-confirm-user-task" class="rebang-btn save" type="button">我点完了</button>
-                <button id="ext-skip-user-task" class="rebang-btn" type="button">跳过这张</button>
+            <div class="rebang-status-card">
+                <p id="ex-user-msg">正在读取每日活动</p>
+                <div id="ext-task-summary">每日活动 待识别</div>
+            </div>
+            <div class="rebang-section">
+                <div class="rebang-section-head">
+                    <span>今日活动</span>
+                    <div class="rebang-section-actions" id="ext-user-task-actions">
+                        <button id="ext-confirm-user-task" type="button">我点完了</button>
+                        <button id="ext-skip-user-task" type="button">跳过这张</button>
+                    </div>
+                </div>
+                <div id="ext-task-list"></div>
             </div>
             <div id="ext-recent-logs"></div>
+            <span id="ext-rewards-points" hidden>--</span>
         </div>
     </div>`;
 
@@ -1978,6 +2129,7 @@ function initRewardsControls() {
     restoreWidgetPosition();
     bindMiniBarToggle();
     renderRecentLogs();
+    updateMiniBar();
 
     $("#ext-stop-rewards").click(function() {
         stopAutoSearch("已停止，正在返回搜索", "stopped");
@@ -1999,6 +2151,7 @@ function initRewardsControls() {
         setVal(BingAssistant.KEYS.userTaskConfirmTries, 0);
         showUserMessage(`已跳过「${waiting.name}」`, { action: `跳过「${waiting.name}」`, result: "已跳过", reason: "你跳过了这张" });
         setUserTaskButtons(false);
+        if (!isRewardsDashboard()) returnToRewardsDashboard("正在返回每日活动清单");
     });
     $("#ext-confirm-user-task").click(function() {
         const waiting = getVal(BingAssistant.KEYS.waitingUserTask, null);

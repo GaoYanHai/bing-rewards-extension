@@ -299,6 +299,61 @@ document.getElementById("export-logs").addEventListener("click", async () => {
   URL.revokeObjectURL(url);
 });
 
+function setBackupStatus(text) {
+  const el = document.getElementById("backup-status");
+  if (el) el.textContent = text || "";
+}
+
+function downloadJson(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById("export-settings").addEventListener("click", async () => {
+  try {
+    const result = await send("EXPORT_SETTINGS");
+    if (!result || !result.ok || !result.data) {
+      setBackupStatus("导出失败，当前设置没有改动。");
+      return;
+    }
+    downloadJson(`bing-assistant-settings-${A.localDateString()}.json`, result.data);
+    setBackupStatus("已导出设置和词库。");
+  } catch (_error) {
+    setBackupStatus("导出失败，当前设置没有改动。");
+  }
+});
+
+document.getElementById("import-settings").addEventListener("click", () => {
+  document.getElementById("import-settings-file").click();
+});
+
+document.getElementById("import-settings-file").addEventListener("change", async (event) => {
+  const input = event.target;
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return;
+  if (!window.confirm("导入会覆盖当前设置和词库，积分和运行状态不会改。确定导入吗？")) {
+    setBackupStatus("已取消导入，当前设置保持不变。");
+    return;
+  }
+  try {
+    const text = await file.text();
+    const result = await send("IMPORT_SETTINGS", { payload: text });
+    if (!result || !result.ok) {
+      setBackupStatus((result && result.error) || "导入失败，当前设置没有改动。");
+      return;
+    }
+    setBackupStatus("设置已导入。");
+  } catch (_error) {
+    setBackupStatus("导入失败，当前设置没有改动。");
+  }
+});
+
 chrome.storage.onChanged.addListener(async (_changes, area) => {
   if (area !== "local") return;
   fill(await chrome.storage.local.get(null));
