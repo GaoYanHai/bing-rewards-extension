@@ -138,6 +138,8 @@ const BingAssistant = (() => {
     catchUpEnabled: "Rebang_CatchUpEnabled",
     catchUpAsk: "Rebang_CatchUpAsk",
     quizAssistEnabled: "Rebang_QuizAssistEnabled",
+    dangerEnabled: "Rebang_DangerEnabled",
+    highRiskTasksEnabled: "Rebang_HighRiskTasksEnabled",
     paused: "Rebang_Paused",
     pauseReason: "Rebang_PauseReason",
     searchIntervalMin: "Rebang_SearchIntervalMin",
@@ -720,7 +722,19 @@ const BingAssistant = (() => {
     };
   }
 
-  function classifyTask(name, url) {
+  function isDangerEnabled(store) {
+    return !!(store && store[KEYS.dangerEnabled] === true);
+  }
+
+  function allowsHighRiskTasks(store) {
+    return isDangerEnabled(store) && store[KEYS.highRiskTasksEnabled] === true;
+  }
+
+  function allowsQuizAssist(store) {
+    return isDangerEnabled(store) && store[KEYS.quizAssistEnabled] === true;
+  }
+
+  function classifyTask(name, url, store) {
     const text = `${name || ""} ${url || ""}`;
     const lower = text.toLowerCase();
     if (/安装|购物|问卷|下载|注册账号|外部|app\s*store|google play|amazon|shop|install|survey|download/.test(text) ||
@@ -729,6 +743,9 @@ const BingAssistant = (() => {
       if (/购物|shop|amazon|buy/.test(lower) || /购物/.test(text)) kind = TASK_KIND.SHOP;
       else if (/问卷|survey/.test(lower) || /问卷/.test(text)) kind = TASK_KIND.SURVEY;
       else if (/下载|download/.test(lower) || /下载/.test(text)) kind = TASK_KIND.DOWNLOAD;
+      if (allowsHighRiskTasks(store)) {
+        return { kind, status: TASK_STATUS.MANUAL, reason: "高风险，需要你点一下" };
+      }
       return { kind, status: TASK_STATUS.SKIPPED, reason: "高风险" };
     }
     if (/测验|quiz|trivia|问答/.test(text) || /quiz|trivia/.test(lower)) {
@@ -1006,13 +1023,15 @@ const BingAssistant = (() => {
       keywordPlan,
       logs,
       recentLogs: Array.isArray(store[KEYS.recentLogs]) ? store[KEYS.recentLogs] : [],
-      mobileEnabled: store[KEYS.mobileSearchEnabled] === true,
+      dangerEnabled: isDangerEnabled(store),
+      highRiskTasksEnabled: allowsHighRiskTasks(store),
+      mobileEnabled: isDangerEnabled(store) && store[KEYS.mobileSearchEnabled] === true,
       mobileLimit: Math.max(0, readNumber(store, KEYS.mobileSearchLimit, DEFAULT_MOBILE_LIMIT)),
       mobileCount: readNumber(store, dailyMobileCountKey(now), 0),
       catchUpEnabled: store[KEYS.catchUpEnabled] !== false,
       catchUpAsk: store[KEYS.catchUpAsk] === true,
       missedRemindEnabled: store[KEYS.missedRemindEnabled] !== false,
-      quizAssistEnabled: store[KEYS.quizAssistEnabled] === true,
+      quizAssistEnabled: allowsQuizAssist(store),
       weekCells: buildWeekCells(store, now),
       streakDays: consecutiveCompleteDays(store, now),
       streakLine: streakLine(store, now),
@@ -1119,6 +1138,9 @@ const BingAssistant = (() => {
     parseKeywordText,
     buildKeywordPlan,
     failCopy,
+    isDangerEnabled,
+    allowsHighRiskTasks,
+    allowsQuizAssist,
     classifyTask,
     taskStatusLabel,
     summarizeTasks,

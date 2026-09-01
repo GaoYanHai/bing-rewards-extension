@@ -171,6 +171,8 @@ async function applyDefaultsIfNeeded() {
   if (store[KEYS.catchUpEnabled] === undefined) patch[KEYS.catchUpEnabled] = true;
   if (store[KEYS.catchUpAsk] === undefined) patch[KEYS.catchUpAsk] = false;
   if (store[KEYS.quizAssistEnabled] === undefined) patch[KEYS.quizAssistEnabled] = false;
+  if (store[KEYS.dangerEnabled] === undefined) patch[KEYS.dangerEnabled] = false;
+  if (store[KEYS.highRiskTasksEnabled] === undefined) patch[KEYS.highRiskTasksEnabled] = false;
   if (store[KEYS.keywordShuffle] === undefined) patch[KEYS.keywordShuffle] = 0;
   if (store[KEYS.paused] === undefined) patch[KEYS.paused] = false;
   if (store[KEYS.pauseReason] === undefined) patch[KEYS.pauseReason] = "";

@@ -128,12 +128,34 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   font-size: 13px;
   line-height: 1.5;
 }
-.danger summary {
-  cursor: pointer;
-  font-weight: 600;
-  margin-bottom: 12px;
+.danger {
+  border-color: #f3d6c9;
 }
+.danger h2 { color: #c42b1c; }
 .danger .help { margin: 0 0 12px; }
+.danger-confirm {
+  background: #fff4ce;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px 0 12px;
+}
+.danger-confirm p { margin: 0 0 8px; }
+.check-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.danger-body {
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+@media (prefers-color-scheme: dark) {
+  .danger { border-color: #5c2e24; }
+  .danger h2 { color: #ff8f73; }
+  .danger-confirm { background: #3b2e00; }
+}
 
 #interval-min, #interval-max { min-width: 72px; width: 72px; }
 #repeat-rule { min-width: 120px; }

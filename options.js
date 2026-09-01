@@ -23,6 +23,13 @@ const dailyRetries = document.getElementById("daily-retries");
 const catchupEnabled = document.getElementById("catchup-enabled");
 const catchupAsk = document.getElementById("catchup-ask");
 const mobileEnabled = document.getElementById("mobile-enabled");
+const dangerEnabled = document.getElementById("danger-enabled");
+const dangerConfirm = document.getElementById("danger-confirm");
+const dangerAck = document.getElementById("danger-ack");
+const dangerConfirmBtn = document.getElementById("danger-confirm-btn");
+const dangerBody = document.getElementById("danger-body");
+const highRiskEnabled = document.getElementById("high-risk-enabled");
+const quizAssist = document.getElementById("quiz-assist");
 const repeatRule = document.getElementById("repeat-rule");
 const intervalMin = document.getElementById("interval-min");
 const intervalMax = document.getElementById("interval-max");
@@ -83,6 +90,17 @@ function fill(store) {
   dailyRetries.value = String(model.dailyRetries);
   catchupEnabled.checked = model.catchUpEnabled;
   catchupAsk.checked = model.catchUpAsk;
+  dangerEnabled.checked = model.dangerEnabled;
+  if (model.dangerEnabled) {
+    dangerConfirm.hidden = true;
+    dangerAck.checked = false;
+    dangerConfirmBtn.disabled = true;
+    dangerBody.hidden = false;
+  } else if (dangerConfirm.hidden) {
+    dangerBody.hidden = true;
+  }
+  highRiskEnabled.checked = model.highRiskTasksEnabled;
+  quizAssist.checked = model.quizAssistEnabled;
   mobileEnabled.checked = model.mobileEnabled;
   repeatRule.value = model.repeatRule;
   intervalMin.value = String(model.intervalMin);
@@ -193,7 +211,66 @@ dailyRetries.addEventListener("change", () => {
 });
 catchupEnabled.addEventListener("change", () => save({ [A.KEYS.catchUpEnabled]: catchupEnabled.checked }));
 catchupAsk.addEventListener("change", () => save({ [A.KEYS.catchUpAsk]: catchupAsk.checked }));
-mobileEnabled.addEventListener("change", () => save({ [A.KEYS.mobileSearchEnabled]: mobileEnabled.checked }));
+function disableDangerSettings() {
+  return save({
+    [A.KEYS.dangerEnabled]: false,
+    [A.KEYS.highRiskTasksEnabled]: false,
+    [A.KEYS.quizAssistEnabled]: false,
+    [A.KEYS.mobileSearchEnabled]: false
+  });
+}
+
+dangerEnabled.addEventListener("change", async () => {
+  if (dangerEnabled.checked) {
+    dangerEnabled.checked = false;
+    dangerConfirm.hidden = false;
+    dangerBody.hidden = true;
+    dangerAck.checked = false;
+    dangerConfirmBtn.disabled = true;
+    return;
+  }
+  dangerConfirm.hidden = true;
+  dangerBody.hidden = true;
+  await disableDangerSettings();
+});
+dangerAck.addEventListener("change", () => {
+  dangerConfirmBtn.disabled = !dangerAck.checked;
+});
+dangerConfirmBtn.addEventListener("click", async () => {
+  if (!dangerAck.checked) return;
+  await save({ [A.KEYS.dangerEnabled]: true });
+  dangerConfirm.hidden = true;
+  dangerBody.hidden = false;
+  dangerEnabled.checked = true;
+});
+document.getElementById("danger-cancel-btn").addEventListener("click", () => {
+  dangerEnabled.checked = false;
+  dangerAck.checked = false;
+  dangerConfirmBtn.disabled = true;
+  dangerConfirm.hidden = true;
+  dangerBody.hidden = true;
+});
+highRiskEnabled.addEventListener("change", () => {
+  if (!dangerEnabled.checked) {
+    highRiskEnabled.checked = false;
+    return;
+  }
+  void save({ [A.KEYS.highRiskTasksEnabled]: highRiskEnabled.checked });
+});
+quizAssist.addEventListener("change", () => {
+  if (!dangerEnabled.checked) {
+    quizAssist.checked = false;
+    return;
+  }
+  void save({ [A.KEYS.quizAssistEnabled]: quizAssist.checked });
+});
+mobileEnabled.addEventListener("change", () => {
+  if (!dangerEnabled.checked) {
+    mobileEnabled.checked = false;
+    return;
+  }
+  void save({ [A.KEYS.mobileSearchEnabled]: mobileEnabled.checked });
+});
 
 document.getElementById("save-custom").addEventListener("click", async () => {
   await save({
