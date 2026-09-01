@@ -550,6 +550,37 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     readStore().then((store) => sendResponse({ ok: true, text: A.exportLogsText(store[KEYS.runLogs]) }));
     return true;
   }
+  if (type === "EXPORT_SETTINGS") {
+    readStore().then((store) => sendResponse({ ok: true, data: A.exportSettings(store) }));
+    return true;
+  }
+  if (type === "IMPORT_SETTINGS") {
+    const parsed = A.importSettings(message.payload);
+    if (!parsed.ok) {
+      sendResponse({ ok: false, error: parsed.error || "导入失败，当前设置没有改动。" });
+      return true;
+    }
+    readStore().then((store) => {
+      const nextStore = { ...store, ...parsed.patch };
+      const extra = {};
+      if (Object.prototype.hasOwnProperty.call(parsed.patch, KEYS.selectedChannel) ||
+          Object.prototype.hasOwnProperty.call(parsed.patch, KEYS.customKeywords) ||
+          Object.prototype.hasOwnProperty.call(parsed.patch, KEYS.blockedKeywords)) {
+        extra[KEYS.keywordShuffle] = A.readNumber(nextStore, KEYS.keywordShuffle, 0) + 1;
+        const plan = refreshKeywordPlan({ ...nextStore, ...extra });
+        extra[KEYS.dailyKeywordPlan] = {
+          date: plan.date,
+          pack: plan.pack,
+          words: plan.words,
+          note: plan.note
+        };
+      }
+      return chrome.storage.local.set({ ...parsed.patch, ...extra });
+    }).then(() => sendResponse({ ok: true })).catch(() => {
+      sendResponse({ ok: false, error: "导入失败，当前设置没有改动。" });
+    });
+    return true;
+  }
   if (type === "RUN_FINISHED") {
     const reason = message.reason || "stopped";
     const reasonCode = message.reasonCode || (reason === "failed" ? A.FAIL_CODES.NO_GAIN : "");

@@ -14,7 +14,7 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "2.0.0";
+  const PRODUCT_VERSION = "2.1.0";
   const DAY_RECORD_KEEP_DAYS = 14;
   const DAY_RECORD_SHOW_DAYS = 7;
   const WEEKEND_GOAL_SAME = "same";
@@ -87,7 +87,10 @@ const BingAssistant = (() => {
     completed: ".mee-icon-SkypeCircleCheck, .c-glyph.glyph-check, i[class*='check'], [aria-label*='Completed'], [aria-label*='已完成']",
     locked: ".locked-card, .mee-icon-Lock, [aria-label*='Locked']",
     link: "a[href]",
-    title: ".title, h3, .c-subheading, .ds-card-title, p.offer-title, .c-title"
+    title: ".title, h3, .c-subheading, .ds-card-title, p.offer-title, .c-title",
+    dashboard: "mee-rewards-daily-set-section, mee-card-group, #more-activities, .rewards-content",
+    quizPage: "#rqStartQuiz, .rqQuestion, .rqQ, .wk_Circle, .TriviaOverlayData, mee-rewards-quiz, [data-bi-id*='quiz'], [data-bi-id*='trivia'], .quizContainer, #quizCompleteContainer",
+    votePage: ".bt_poll, [data-bi-id*='poll'], [data-bi-id*='thisorthat']"
   };
 
   const KEYS = {
@@ -161,6 +164,7 @@ const BingAssistant = (() => {
   };
 
   const SHORT_KEYWORD_POOL = [
+    "天气", "新闻", "外卖", "小说", "基金", "篮球", "足球",
     "天气预报", "今日新闻", "翻译", "地图", "汇率查询", "股票行情", "快递查询", "家常菜谱",
     "电影票", "火车票", "今日油价", "手机推荐", "笔记本电脑", "无线耳机", "数码相机",
     "健身计划", "减肥方法", "护肤步骤", "穿搭灵感", "旅游攻略", "酒店预订", "机票查询",
@@ -341,6 +345,7 @@ const BingAssistant = (() => {
     if (status === "complete") return "已完成";
     if (status === "failed") return "失败";
     if (status === "today") return "今天";
+    if (status === "empty") return "还没有记录";
     return "未做完";
   }
 
@@ -352,10 +357,11 @@ const BingAssistant = (() => {
       const date = shiftLocalDate(now, -offset);
       const dateStr = localDateString(date);
       const record = records.get(dateStr);
-      let status = "incomplete";
+      let status = "empty";
       if (dateStr === today) status = "today";
       else if (record && record.status === "complete") status = "complete";
       else if (record && record.status === "failed") status = "failed";
+      else if (record) status = "incomplete";
       cells.push({
         date: dateStr,
         day: date.getDate(),
@@ -483,11 +489,11 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "2.0 会记得这几天有没有做完",
+      title: "2.1 卡住时也知道下一步",
       points: [
-        "打开 Popup 能看到近 7 天做没做完",
-        "漏了一天会提醒，失败后可以从进度接着做",
-        "周末可以单独设成只搜满"
+        "选项页和 Rewards 现场条更整齐",
+        "测验页会认出来，不会当成找不到卡片",
+        "可以导出 / 导入本机设置"
       ]
     };
   }
@@ -663,6 +669,13 @@ const BingAssistant = (() => {
       seed += 1;
       shuffled = seededShuffle(source, seed);
     }
+    const shorts = result.filter((item) => item.title.length === 2);
+    if (target >= 10 && shorts.length) {
+      const extra = shorts[seed % shorts.length];
+      const pos = Math.min(result.length - 1, (seed % Math.max(2, result.length - 2)) + 1);
+      result.splice(pos, 0, extra);
+      if (result.length > target) result.pop();
+    }
     return {
       date: localDateString(now),
       pack,
@@ -759,6 +772,21 @@ const BingAssistant = (() => {
       return { kind: TASK_KIND.EXPLORE, status: TASK_STATUS.AUTO, reason: "打开即可得分" };
     }
     return { kind: TASK_KIND.UNKNOWN, status: TASK_STATUS.UNKNOWN, reason: "页面改版" };
+  }
+
+  function isRewardsDashboardPath(pathname) {
+    const path = String(pathname || "/").replace(/\/+$/, "") || "/";
+    return path === "/" || path === "/dashboard" || path === "/welcome" || path === "/status";
+  }
+
+  function isQuizOrVotePage(loc, root) {
+    const href = `${(loc && loc.pathname) || ""} ${(loc && loc.search) || ""} ${(loc && loc.href) || ""}`;
+    if (/quiz|trivia|poll|thisorthat|rewardsquiz/i.test(href)) return true;
+    try {
+      if (root && root.querySelector && TASK_SELECTORS.quizPage && root.querySelector(TASK_SELECTORS.quizPage)) return true;
+      if (root && root.querySelector && TASK_SELECTORS.votePage && root.querySelector(TASK_SELECTORS.votePage)) return true;
+    } catch (_error) {}
+    return false;
   }
 
   function taskStatusLabel(card) {
@@ -902,6 +930,151 @@ const BingAssistant = (() => {
     return (Array.isArray(logs) ? logs : []).map((entry) => {
       return [entry.date, formatLogLine(entry)].filter(Boolean).join("  ");
     }).join("\n");
+  }
+
+  const SETTINGS_EXPORT_KEYS = [
+    KEYS.autoStartHour,
+    KEYS.autoStartMin,
+    KEYS.repeatRule,
+    KEYS.todayGoal,
+    KEYS.enableDailyTasks,
+    KEYS.weekendGoal,
+    KEYS.limitSearchCount,
+    KEYS.weekendSearchLimit,
+    KEYS.missedRemindEnabled,
+    KEYS.notifyEnabled,
+    KEYS.selectedChannel,
+    KEYS.customKeywords,
+    KEYS.blockedKeywords,
+    KEYS.searchIntervalMin,
+    KEYS.searchIntervalMax,
+    KEYS.simulateTyping,
+    KEYS.pauseWhenBusy,
+    KEYS.maxNoGainLimit,
+    KEYS.dailyTaskMaxRetries,
+    KEYS.catchUpEnabled,
+    KEYS.catchUpAsk,
+    KEYS.dangerEnabled,
+    KEYS.highRiskTasksEnabled,
+    KEYS.quizAssistEnabled,
+    KEYS.mobileSearchEnabled,
+    KEYS.mobileSearchLimit
+  ];
+
+  function exportSettings(store) {
+    const settings = {};
+    SETTINGS_EXPORT_KEYS.forEach((key) => {
+      if (store && Object.prototype.hasOwnProperty.call(store, key) && typeof store[key] !== "undefined") {
+        settings[key] = store[key];
+      }
+    });
+    return {
+      product: PRODUCT_NAME_ZH,
+      version: PRODUCT_VERSION,
+      exportedAt: new Date().toISOString(),
+      settings
+    };
+  }
+
+  function readBooleanSetting(value) {
+    if (value === true || value === "true") return true;
+    if (value === false || value === "false") return false;
+    return null;
+  }
+
+  function importSettings(payload) {
+    let data = payload;
+    if (typeof payload === "string") {
+      try {
+        data = JSON.parse(payload);
+      } catch (_error) {
+        return { ok: false, error: "文件不是有效的 JSON。" };
+      }
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return { ok: false, error: "备份文件格式不对。" };
+    }
+    const raw = data.settings && typeof data.settings === "object" && !Array.isArray(data.settings)
+      ? data.settings
+      : data;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return { ok: false, error: "备份里没有找到设置。" };
+    }
+    const patch = {};
+    const known = new Set(SETTINGS_EXPORT_KEYS);
+    Object.keys(raw).forEach((key) => {
+      if (!known.has(key)) return;
+      const value = raw[key];
+      if (typeof value === "undefined") return;
+      patch[key] = value;
+    });
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.todayGoal) || Object.prototype.hasOwnProperty.call(patch, KEYS.enableDailyTasks)) {
+      const goal = normalizeGoal(Object.prototype.hasOwnProperty.call(patch, KEYS.todayGoal) ? patch[KEYS.todayGoal] : { [KEYS.enableDailyTasks]: patch[KEYS.enableDailyTasks] });
+      patch[KEYS.todayGoal] = goal;
+      patch[KEYS.enableDailyTasks] = goalEnablesDaily(goal);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.weekendGoal)) {
+      patch[KEYS.weekendGoal] = normalizeWeekendGoal(patch[KEYS.weekendGoal]);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.repeatRule)) {
+      patch[KEYS.repeatRule] = normalizeRepeatRule(patch[KEYS.repeatRule]);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.selectedChannel)) {
+      patch[KEYS.selectedChannel] = normalizeWordPack(patch[KEYS.selectedChannel]);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.customKeywords)) {
+      patch[KEYS.customKeywords] = String(patch[KEYS.customKeywords] || "");
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.blockedKeywords)) {
+      patch[KEYS.blockedKeywords] = normalizeStringList(patch[KEYS.blockedKeywords]);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.limitSearchCount)) {
+      const value = Math.max(1, Math.round(Number(patch[KEYS.limitSearchCount]) || DEFAULT_SEARCH_LIMIT));
+      patch[KEYS.limitSearchCount] = value;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.weekendSearchLimit)) {
+      const rawLimit = String(patch[KEYS.weekendSearchLimit] == null ? "" : patch[KEYS.weekendSearchLimit]).trim();
+      patch[KEYS.weekendSearchLimit] = rawLimit ? Math.max(1, Math.round(Number(rawLimit) || DEFAULT_SEARCH_LIMIT)) : "";
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.searchIntervalMin) || Object.prototype.hasOwnProperty.call(patch, KEYS.searchIntervalMax)) {
+      const range = normalizeIntervalRange(patch[KEYS.searchIntervalMin], patch[KEYS.searchIntervalMax]);
+      patch[KEYS.searchIntervalMin] = range.min;
+      patch[KEYS.searchIntervalMax] = range.max;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.maxNoGainLimit)) {
+      patch[KEYS.maxNoGainLimit] = Math.max(3, Math.round(Number(patch[KEYS.maxNoGainLimit]) || DEFAULT_NO_GAIN_LIMIT));
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.dailyTaskMaxRetries)) {
+      patch[KEYS.dailyTaskMaxRetries] = Math.max(1, Math.round(Number(patch[KEYS.dailyTaskMaxRetries]) || DEFAULT_DAILY_RETRIES));
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.mobileSearchLimit)) {
+      patch[KEYS.mobileSearchLimit] = Math.max(0, Math.round(Number(patch[KEYS.mobileSearchLimit]) || DEFAULT_MOBILE_LIMIT));
+    }
+    [
+      KEYS.missedRemindEnabled,
+      KEYS.notifyEnabled,
+      KEYS.simulateTyping,
+      KEYS.pauseWhenBusy,
+      KEYS.catchUpEnabled,
+      KEYS.catchUpAsk,
+      KEYS.dangerEnabled,
+      KEYS.highRiskTasksEnabled,
+      KEYS.quizAssistEnabled,
+      KEYS.mobileSearchEnabled
+    ].forEach((key) => {
+      if (!Object.prototype.hasOwnProperty.call(patch, key)) return;
+      const flag = readBooleanSetting(patch[key]);
+      if (flag === null) delete patch[key];
+      else patch[key] = flag;
+    });
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.dangerEnabled) && !isDangerEnabled(patch)) {
+      patch[KEYS.dangerEnabled] = false;
+      patch[KEYS.highRiskTasksEnabled] = false;
+      patch[KEYS.quizAssistEnabled] = false;
+      patch[KEYS.mobileSearchEnabled] = false;
+    }
+    if (!Object.keys(patch).length) return { ok: false, error: "备份里没有可用的设置。" };
+    return { ok: true, patch };
   }
 
   function readTaskList(store, now = new Date()) {
@@ -1153,6 +1326,11 @@ const BingAssistant = (() => {
     formatLogLine,
     todayLogs,
     exportLogsText,
+    SETTINGS_EXPORT_KEYS,
+    exportSettings,
+    importSettings,
+    isRewardsDashboardPath,
+    isQuizOrVotePage,
     readTaskList,
     buildViewModel,
     suggestedTimeLabel
