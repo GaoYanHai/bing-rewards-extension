@@ -244,7 +244,7 @@ GM_addStyle(`
     #ex-user-msg { font-size: 12px; color: #d9534f; margin-top: 5px; display: block; min-height: 18px; }
     .checkbox-wrapper { display: flex; align-items: center; gap: 4px; }
     input[type=checkbox] { accent-color: #0078d4; }
-    #rebang-widget { width: min(420px, calc(100vw - 24px)); }
+    #rebang-widget { width: 300px; max-width: calc(100vw - 24px); }
     #rebang-header { min-height: 48px; padding: 8px 12px; gap: 8px; flex-wrap: nowrap; }
     #rebang-title { font-size: 13px; }
     #rebang-mini-progress { margin-left: auto; font-size: 12px; color: #0078d4; font-weight: 600; white-space: nowrap; }
@@ -266,6 +266,141 @@ GM_addStyle(`
     @media (prefers-color-scheme: dark) {
         #rebang-mini-current, .rebang-pack-note, .rebang-log, #ex-user-msg { color: #bbb; }
     }
+
+    #rebang-widget {
+        width: 300px;
+        max-width: calc(100vw - 24px);
+        background: rgba(255,255,255,0.96);
+        backdrop-filter: blur(16px);
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+        border: 1px solid rgba(0,0,0,0.06);
+    }
+    #rebang-body {
+        padding: 10px 12px 12px;
+        max-height: 360px;
+        gap: 8px;
+    }
+    .rebang-status-card {
+        background: #f7f7f5;
+        border-radius: 10px;
+        padding: 8px 10px;
+    }
+    .rebang-status-card #ex-user-msg {
+        margin: 0;
+        min-height: 0;
+        color: #323130;
+        font-size: 12px;
+        line-height: 1.4;
+    }
+    .rebang-status-card #ext-task-summary {
+        margin: 4px 0 0;
+        font-size: 11px;
+        color: #8a8886;
+    }
+    .rebang-section-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+    }
+    .rebang-section-head > span {
+        font-size: 12px;
+        font-weight: 600;
+        color: #201f1e;
+    }
+    .rebang-section-actions { display: flex; gap: 8px; }
+    .rebang-section-actions button {
+        height: auto;
+        padding: 0;
+        background: none;
+        color: #0078d4;
+        border: 0;
+        font-size: 12px;
+        cursor: pointer;
+    }
+    .rebang-section-actions button:hover { text-decoration: underline; }
+    .rebang-pack-note {
+        margin: 0 0 8px;
+        font-size: 11px;
+        color: #8a8886;
+    }
+    #ext-keywords-list {
+        margin: 0;
+        max-height: 220px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding-right: 2px;
+    }
+    .keyword-link {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 7px 8px;
+        border-radius: 8px;
+        text-decoration: none;
+        color: #201f1e;
+        font-size: 13px;
+        background: #f7f7f5;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+    .keyword-link em {
+        flex: 0 0 22px;
+        height: 22px;
+        border-radius: 6px;
+        background: #fff;
+        color: #8a8886;
+        font-style: normal;
+        font-size: 11px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .keyword-link span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .keyword-link:hover { background: #eef6fc; color: #0078d4; }
+    .keyword-link-current {
+        font-weight: 600;
+        color: #0078d4 !important;
+        background: #e8f4fd !important;
+        animation: none;
+        border-left: 0;
+        padding-left: 8px;
+        box-shadow: inset 0 0 0 1px rgba(0,120,212,0.25);
+    }
+    .keyword-link-current em { background: #0078d4; color: #fff; }
+    .keyword-link-searched {
+        text-decoration: none;
+        opacity: 0.55;
+    }
+    .keyword-link-searched span { text-decoration: line-through; }
+    #ext-recent-logs {
+        max-height: 54px;
+        overflow: auto;
+        padding-top: 4px;
+        border-top: 1px solid rgba(0,0,0,0.05);
+    }
+    .rebang-log { font-size: 11px; color: #8a8886; padding: 1px 0; }
+    @media (prefers-color-scheme: dark) {
+        #rebang-widget { background: rgba(32,31,30,0.96); border-color: #3b3a39; }
+        .rebang-status-card, .keyword-link { background: #2b2a29; }
+        .rebang-status-card #ex-user-msg, .rebang-section-head > span, .keyword-link { color: #f3f2f1; }
+        .keyword-link em { background: #3b3a39; color: #c8c6c4; }
+        .keyword-link:hover { background: #243447; }
+        .keyword-link-current { background: #1b3a52 !important; color: #4cc2ff !important; }
+        #ext-recent-logs { border-top-color: #3b3a39; }
+    }
+    .b_dark #rebang-widget { background: rgba(32,31,30,0.96); }
+    .b_dark .rebang-status-card, .b_dark .keyword-link { background: #2b2a29; }
+    .b_dark .rebang-status-card #ex-user-msg, .b_dark .rebang-section-head > span, .b_dark .keyword-link { color: #f3f2f1; }
+    .b_dark .keyword-link em { background: #3b3a39; color: #c8c6c4; }
+    .b_dark .keyword-link-current { background: #1b3a52 !important; color: #4cc2ff !important; }
 `);
 
 // 修复：不使用 this（严格模式下 this 为 undefined 会崩溃）
@@ -856,7 +991,13 @@ function renderRecentLogs() {
   if (!box.length) return;
   let logs = getVal(BingAssistant.KEYS.recentLogs, []);
   if (!Array.isArray(logs)) logs = [];
+  logs = logs.slice(0, 3);
   box.empty();
+  if (!logs.length) {
+    box.hide();
+    return;
+  }
+  box.show();
   logs.forEach((item) => {
     box.append(`<div class="rebang-log">${escapeHtml(item.text || "")}</div>`);
   });
@@ -1641,7 +1782,7 @@ function initKeywords() {
     keywords = generateDailyKeywords(limit + 10, getCurrentChannel()).filter((item) => !blocked.has(item.title));
     sessionStorage.setItem(cacheKey, JSON.stringify(keywords));
     renderKeywords(keywords);
-    showUserMessage(BingAssistant.KEYWORD_NOTE, { action: BingAssistant.KEYWORD_NOTE });
+    showUserMessage("今日搜索词已准备好", { action: BingAssistant.KEYWORD_NOTE });
   }
 }
 
@@ -1656,11 +1797,12 @@ function renderKeywords(keywords) {
     let safeTitle = escapeHtml(element.title);
     let safeText = escapeHtml(truncateText(element.title, 20));
     let linkHtml = "";
+    const rowInner = `<em>${index + 1}</em><span>${safeText}</span>`;
     if ($("#ext-keywords-linktype").val() == "搜索") {
-        linkHtml = `<a target='_self' class='keyword-link keyword-link-search ${activeClass}' title='${safeTitle}' href='#'>${index + 1}. ${safeText}</a>`;
+        linkHtml = `<a target='_self' class='keyword-link keyword-link-search ${activeClass}' title='${safeTitle}' href='#'>${rowInner}</a>`;
     } else {
         let safeUrl = escapeHtml(element.url ?? element.mobileUrl);
-        linkHtml = `<a target='_blank' class='keyword-link ${activeClass}' title='${safeTitle}' href='${safeUrl}'>${index + 1}. ${safeText}</a>`;
+        linkHtml = `<a target='_blank' class='keyword-link ${activeClass}' title='${safeTitle}' href='${safeUrl}'>${rowInner}</a>`;
     }
     $("#ext-keywords-list").append(linkHtml);
   });
@@ -1879,16 +2021,22 @@ function initSearchControls() {
             <span id="rebang-toggle-icon" class="rebang-btn-icon" title="展开">+</span>
         </div>
         <div id="rebang-body">
-            <label id="ex-user-msg"></label>
-            <div id="ext-task-summary">每日活动 未开启（安全模式）</div>
-            <div class="rebang-pack-note">
-                <span>今日词库已生成 · 基于本地词包 · 未使用热榜</span>
-                <button id="ext-keywords-refresh" class="rebang-btn" type="button">换一批</button>
-                <button id="ext-block-keyword" class="rebang-btn" type="button">拉黑当前词</button>
+            <div class="rebang-status-card">
+                <p id="ex-user-msg"></p>
+                <div id="ext-task-summary">每日活动 未开启（安全模式）</div>
+            </div>
+            <div class="rebang-section">
+                <div class="rebang-section-head">
+                    <span>今日搜索词</span>
+                    <div class="rebang-section-actions">
+                        <button id="ext-keywords-refresh" type="button">换一批</button>
+                        <button id="ext-block-keyword" type="button">拉黑当前</button>
+                    </div>
+                </div>
+                <p class="rebang-pack-note">基于本地词包 · 未使用热榜</p>
+                <div id="ext-keywords-list"></div>
             </div>
             <div id="ext-recent-logs"></div>
-            <div id="ext-keywords-list"></div>
-            <div class="control-row"><button id="rebang-open-options" class="rebang-btn" type="button">打开设置</button></div>
             <input type="hidden" id="ext-autosearch-limit" value="${savedLimit}">
             <select id="ext-channels" hidden></select>
             <select id="ext-keywords-linktype" hidden><option value="搜索" selected>搜索</option></select>
@@ -1960,10 +2108,6 @@ function initSearchControls() {
       chrome.runtime.sendMessage({ type: "BLOCK_KEYWORD", word }).catch(() => {});
       showUserMessage(`已拉黑「${word}」，今天不再搜`);
   });
-  $("#rebang-open-options").off("click.rebang").on("click.rebang", function () {
-      chrome.runtime.openOptionsPage();
-  });
-
   $("#ext-autosearch-lock").off("click.rebang").on("click.rebang", function () {
     if (getVal(autoSearchLockKey, "off") == "on") {
       if (isRunPaused()) {

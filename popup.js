@@ -4,6 +4,7 @@ const A = BingAssistant;
 
 const viewRisk = document.getElementById("view-risk");
 const viewMain = document.getElementById("view-main");
+const viewHelp = document.getElementById("view-help");
 const riskCheck = document.getElementById("risk-check");
 const riskAccept = document.getElementById("risk-accept");
 const accountLine = document.getElementById("account-line");
@@ -19,7 +20,6 @@ const weekRow = document.getElementById("week-row");
 const streakLine = document.getElementById("streak-line");
 const whatsNew = document.getElementById("whats-new");
 const whatsNewTitle = document.getElementById("whats-new-title");
-const whatsNewPoints = document.getElementById("whats-new-points");
 const primaryBtn = document.getElementById("primary-btn");
 const hint = document.getElementById("hint");
 const hintActions = document.getElementById("hint-actions");
@@ -31,7 +31,7 @@ function send(type, extra = {}) {
 }
 
 function renderLogs(model) {
-  const logs = (model.logs || []).slice(0, 6);
+  const logs = (model.logs || []).slice(0, 3);
   if (!logs.length) {
     logBox.hidden = true;
     logBox.innerHTML = "";
@@ -69,21 +69,47 @@ function renderWeek(model) {
   streakLine.textContent = model.streakLine || "";
 }
 
-function renderWhatsNew(model, force) {
+function renderWhatsNew(model) {
   const copy = model.whatsNew || A.whatsNewCopy();
-  const show = force || model.showWhatsNew;
-  whatsNew.hidden = !show;
-  if (!show) return;
-  whatsNewTitle.textContent = copy.title;
-  whatsNewPoints.innerHTML = (copy.points || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  whatsNew.hidden = !model.showWhatsNew;
+  if (model.showWhatsNew) whatsNewTitle.textContent = copy.title;
+}
+
+function fillHelp(model) {
+  const copy = (model && model.whatsNew) || A.whatsNewCopy();
+  document.getElementById("help-version").textContent = `版本 ${copy.version || A.PRODUCT_VERSION}`;
+  document.getElementById("help-title").textContent = copy.title;
+  document.getElementById("help-points").innerHTML = (copy.points || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+}
+
+function showHelp() {
+  fillHelp(A.buildViewModel({}));
+  chrome.storage.local.get(null).then((store) => fillHelp(A.buildViewModel(store)));
+  viewRisk.hidden = true;
+  viewMain.hidden = true;
+  viewHelp.hidden = false;
+}
+
+function showMain() {
+  viewHelp.hidden = true;
+  void refresh();
 }
 
 function render(store) {
   const model = A.buildViewModel(store);
   const showRisk = !model.riskAccepted;
   viewRisk.hidden = !showRisk;
-  viewMain.hidden = showRisk;
-  if (showRisk) return;
+  if (showRisk) {
+    viewMain.hidden = true;
+    viewHelp.hidden = true;
+    return;
+  }
+  if (!viewHelp.hidden) {
+    viewMain.hidden = true;
+    fillHelp(model);
+    return;
+  }
+  viewMain.hidden = false;
 
   if (model.points !== null) {
     accountLine.textContent = model.loginState === "out"
@@ -107,7 +133,7 @@ function render(store) {
   stopLink.hidden = true;
   setHintActions(false);
   renderWeek(model);
-  renderWhatsNew(model, whatsNew.dataset.force === "1");
+  renderWhatsNew(model);
   renderLogs(model);
 
   if (model.state === "logged_out") {
@@ -246,15 +272,15 @@ document.getElementById("open-options").addEventListener("click", () => {
 });
 document.getElementById("open-bing").addEventListener("click", () => send("OPEN_BING"));
 document.getElementById("whats-new-dismiss").addEventListener("click", async () => {
-  whatsNew.dataset.force = "";
   await send("DISMISS_WHATS_NEW");
   await refresh();
 });
-document.getElementById("open-help").addEventListener("click", async () => {
-  whatsNew.dataset.force = "1";
-  await send("SHOW_WHATS_NEW");
-  await refresh();
+document.getElementById("whats-new-more").addEventListener("click", async () => {
+  await send("DISMISS_WHATS_NEW");
+  showHelp();
 });
+document.getElementById("open-help").addEventListener("click", () => showHelp());
+document.getElementById("help-back").addEventListener("click", () => showMain());
 
 chrome.storage.onChanged.addListener((_changes, area) => {
   if (area === "local") void refresh();
