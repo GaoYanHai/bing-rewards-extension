@@ -14,6 +14,10 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
+  const PRODUCT_VERSION = "2.0.0";
+  const DAY_RECORD_KEEP_DAYS = 14;
+  const DAY_RECORD_SHOW_DAYS = 7;
+  const WEEKEND_GOAL_SAME = "same";
   const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
   const WORD_PACK_SHORT = "日常短词";
   const WORD_PACK_LONG = "生活长尾";
@@ -144,7 +148,14 @@ const BingAssistant = (() => {
     runStartPoints: "Rebang_RunStartPoints",
     userTaskAction: "Rebang_UserTaskAction",
     userTaskConfirmTries: "Rebang_UserTaskConfirmTries",
-    ignoreBusyUntil: "Rebang_IgnoreBusyUntil"
+    ignoreBusyUntil: "Rebang_IgnoreBusyUntil",
+    dayRecords: "Rebang_DayRecords",
+    weekendGoal: "Rebang_WeekendGoal",
+    weekendSearchLimit: "Rebang_WeekendSearchLimit",
+    missedRemindEnabled: "Rebang_MissedRemindEnabled",
+    missedReminded: "Rebang_MissedReminded",
+    catchUpDismissed: "Rebang_CatchUpDismissed",
+    whatsNewSeen: "Rebang_WhatsNewSeen"
   };
 
   const SHORT_KEYWORD_POOL = [
@@ -254,6 +265,233 @@ const BingAssistant = (() => {
     if (normalized === REPEAT.WEEKDAYS) return day >= 1 && day <= 5;
     if (normalized === REPEAT.WEEKENDS) return day === 0 || day === 6;
     return true;
+  }
+
+  function isWeekend(date = new Date()) {
+    const day = date.getDay();
+    return day === 0 || day === 6;
+  }
+
+  function shiftLocalDate(date, days) {
+    const next = new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+    return next;
+  }
+
+  function weekdayShort(date) {
+    return WEEKDAY_NAMES[date.getDay()] || "";
+  }
+
+  function normalizeWeekendGoal(value) {
+    if (value === GOALS.SEARCH_ONLY || value === GOALS.SEARCH_SAFE || value === GOALS.TRY_ALL) return value;
+    return WEEKEND_GOAL_SAME;
+  }
+
+  function weekendGoalLabel(value) {
+    const goal = normalizeWeekendGoal(value);
+    if (goal === WEEKEND_GOAL_SAME) return "与工作日相同";
+    return goalLabel(goal);
+  }
+
+  function effectiveGoal(store, now = new Date()) {
+    const weekdayGoal = normalizeGoal(store);
+    if (!isWeekend(now)) return weekdayGoal;
+    const weekendGoal = normalizeWeekendGoal(store && store[KEYS.weekendGoal]);
+    return weekendGoal === WEEKEND_GOAL_SAME ? weekdayGoal : weekendGoal;
+  }
+
+  function effectiveSearchLimit(store, now = new Date()) {
+    const weekdayLimit = Math.max(1, readNumber(store || {}, KEYS.limitSearchCount, DEFAULT_SEARCH_LIMIT));
+    if (!isWeekend(now)) return weekdayLimit;
+    const weekendLimit = Number(store && store[KEYS.weekendSearchLimit]);
+    if (Number.isFinite(weekendLimit) && weekendLimit > 0) return Math.max(1, Math.round(weekendLimit));
+    return weekdayLimit;
+  }
+
+  function readDayRecords(store) {
+    const raw = store && store[KEYS.dayRecords];
+    return Array.isArray(raw) ? raw.filter((item) => item && item.date) : [];
+  }
+
+  function pruneDayRecords(records, now = new Date()) {
+    const cutoff = localDateString(shiftLocalDate(now, -(DAY_RECORD_KEEP_DAYS - 1)));
+    const byDate = new Map();
+    (Array.isArray(records) ? records : []).forEach((item) => {
+      if (!item || !item.date || item.date < cutoff) return;
+      byDate.set(item.date, item);
+    });
+    return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  function upsertDayRecord(records, record, now = new Date()) {
+    if (!record || !record.date) return pruneDayRecords(records, now);
+    const next = pruneDayRecords(records, now).filter((item) => item.date !== record.date);
+    next.push(record);
+    return pruneDayRecords(next, now);
+  }
+
+  function dayRecordMap(store) {
+    const map = new Map();
+    readDayRecords(store).forEach((item) => map.set(item.date, item));
+    return map;
+  }
+
+  function recordStatusLabel(status) {
+    if (status === "complete") return "已完成";
+    if (status === "failed") return "失败";
+    if (status === "today") return "今天";
+    return "未做完";
+  }
+
+  function buildWeekCells(store, now = new Date()) {
+    const records = dayRecordMap(store);
+    const today = localDateString(now);
+    const cells = [];
+    for (let offset = DAY_RECORD_SHOW_DAYS - 1; offset >= 0; offset--) {
+      const date = shiftLocalDate(now, -offset);
+      const dateStr = localDateString(date);
+      const record = records.get(dateStr);
+      let status = "incomplete";
+      if (dateStr === today) status = "today";
+      else if (record && record.status === "complete") status = "complete";
+      else if (record && record.status === "failed") status = "failed";
+      cells.push({
+        date: dateStr,
+        day: date.getDate(),
+        weekday: weekdayShort(date).replace("周", ""),
+        status,
+        title: `${date.getMonth() + 1}月${date.getDate()}日 ${recordStatusLabel(status)}`
+      });
+    }
+    return cells;
+  }
+
+  function consecutiveCompleteDays(store, now = new Date()) {
+    const records = dayRecordMap(store);
+    const rule = normalizeRepeatRule(store && store[KEYS.repeatRule]);
+    let cursor = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayStr = localDateString(cursor);
+    if (isScheduledDay(cursor, rule)) {
+      const todayRecord = records.get(todayStr);
+      if (!(todayRecord && todayRecord.status === "complete")) {
+        cursor = shiftLocalDate(cursor, -1);
+      }
+    }
+    let count = 0;
+    for (let i = 0; i < 60; i++) {
+      if (!isScheduledDay(cursor, rule)) {
+        cursor = shiftLocalDate(cursor, -1);
+        continue;
+      }
+      const record = records.get(localDateString(cursor));
+      if (record && record.status === "complete") {
+        count += 1;
+        cursor = shiftLocalDate(cursor, -1);
+        continue;
+      }
+      break;
+    }
+    return count;
+  }
+
+  function yesterdayWasScheduled(store, now = new Date()) {
+    const yesterday = shiftLocalDate(now, -1);
+    return isScheduledDay(yesterday, store && store[KEYS.repeatRule]);
+  }
+
+  function hasHistoryBefore(store, dateStr) {
+    if (readDayRecords(store).some((item) => item.date && item.date < dateStr)) return true;
+    const summary = store && store[KEYS.lastRunSummary];
+    if (summary && summary.at) {
+      return localDateString(new Date(summary.at)) < dateStr;
+    }
+    return false;
+  }
+
+  function yesterdayMissed(store, now = new Date()) {
+    if (!yesterdayWasScheduled(store, now)) return false;
+    const yesterday = localDateString(shiftLocalDate(now, -1));
+    const record = dayRecordMap(store).get(yesterday);
+    if (record && record.status === "complete") return false;
+    if (record) return true;
+    return hasHistoryBefore(store, localDateString(now));
+  }
+
+  function streakLine(store, now = new Date()) {
+    if (yesterdayMissed(store, now)) return "昨天还没做完";
+    const days = consecutiveCompleteDays(store, now);
+    if (days > 0) return `已连续完成 ${days} 天`;
+    return "这几天还没有连续完成";
+  }
+
+  function shouldRemindMissed(store, now = new Date()) {
+    if (!store || store[KEYS.missedRemindEnabled] === false) return false;
+    if (!yesterdayMissed(store, now)) return false;
+    const today = localDateString(now);
+    if (store[KEYS.missedReminded] === today) return false;
+    if (store[KEYS.catchUpPrompted] === today) return false;
+    if (store[KEYS.catchUpDismissed] === today) return false;
+    const count = readNumber(store, dailyCountKey(now), 0);
+    const limit = effectiveSearchLimit(store, now);
+    const dailyEnabled = goalEnablesDaily(effectiveGoal(store, now));
+    const dailyDone = store[dailyTasksDoneKey(now)] === true || store[dailyTasksDoneKey(now)] === "true";
+    if (count >= limit && (!dailyEnabled || dailyDone)) return false;
+    return true;
+  }
+
+  function buildDayRecord(store, extra = {}, now = new Date()) {
+    const count = extra.count != null ? Number(extra.count) : readNumber(store, dailyCountKey(now), 0);
+    const limit = extra.limit != null ? Number(extra.limit) : effectiveSearchLimit(store, now);
+    const reason = extra.reason || "stopped";
+    const reasonCode = extra.reasonCode || "";
+    const goal = extra.goal || effectiveGoal(store, now);
+    const dailyEnabled = extra.dailyEnabled != null ? extra.dailyEnabled : goalEnablesDaily(goal);
+    const dailyDone = extra.dailyDone != null
+      ? extra.dailyDone
+      : (store[dailyTasksDoneKey(now)] === true || store[dailyTasksDoneKey(now)] === "true");
+    const dailySummary = extra.dailySummary || summarizeTasks(readTaskList(store, now).cards);
+    let status = "incomplete";
+    if (reason === "complete") status = "complete";
+    else if (reason === "failed") status = "failed";
+    const hasProgress = count > 0 || dailyDone || (dailySummary && dailySummary.done > 0);
+    if (reason !== "complete" && reason !== "failed" && !hasProgress) return null;
+    return {
+      date: localDateString(now),
+      status,
+      count,
+      limit,
+      dailyEnabled,
+      dailyDone,
+      reasonCode,
+      at: extra.at || Date.now()
+    };
+  }
+
+  function continueHint(model) {
+    if (!model) return "点继续会接着今天的进度，不会从头搜。";
+    if (model.failReasonCode === FAIL_CODES.LOGIN) return model.failMessage || "请重新登录后再继续。";
+    if (model.count >= model.limit && model.dailyEnabled && !model.dailyDone) {
+      return "电脑搜索已满，继续会去处理每日活动。";
+    }
+    if (model.count > 0) {
+      return `已经完成 ${model.count}/${model.limit} 次搜索。点继续会接着做，不会从头搜。`;
+    }
+    return model.failMessage || "点继续会接着今天的进度，不会从头搜。";
+  }
+
+  function whatsNewCopy() {
+    return {
+      version: PRODUCT_VERSION,
+      title: "2.0 会记得这几天有没有做完",
+      points: [
+        "打开 Popup 能看到近 7 天做没做完",
+        "漏了一天会提醒，失败后可以从进度接着做",
+        "周末可以单独设成只搜满"
+      ]
+    };
+  }
+
+  function shouldShowWhatsNew(store) {
+    return !store || store[KEYS.whatsNewSeen] !== PRODUCT_VERSION;
   }
 
   function normalizeIntervalRange(minValue, maxValue) {
@@ -477,7 +715,7 @@ const BingAssistant = (() => {
     }
     return {
       short: "已停止",
-      next: "可以重新开始",
+      next: "可以继续今天的进度",
       message: extra.message || "已停止"
     };
   }
@@ -503,7 +741,7 @@ const BingAssistant = (() => {
         /explore|search|visit|read/.test(lower)) {
       return { kind: TASK_KIND.EXPLORE, status: TASK_STATUS.AUTO, reason: "打开即可得分" };
     }
-    return { kind: TASK_KIND.UNKNOWN, status: TASK_STATUS.UNKNOWN, reason: "识别失败" };
+    return { kind: TASK_KIND.UNKNOWN, status: TASK_STATUS.UNKNOWN, reason: "页面改版" };
   }
 
   function taskStatusLabel(card) {
@@ -571,12 +809,12 @@ const BingAssistant = (() => {
 
   function buildTodaySummary(store, extra = {}, now = new Date()) {
     const count = extra.count != null ? Number(extra.count) : readNumber(store, dailyCountKey(now), 0);
-    const limit = extra.limit != null ? Number(extra.limit) : Math.max(1, readNumber(store, KEYS.limitSearchCount, DEFAULT_SEARCH_LIMIT));
+    const limit = extra.limit != null ? Number(extra.limit) : effectiveSearchLimit(store, now);
     const durationMs = extra.durationMs != null ? Number(extra.durationMs) : 0;
     const reason = extra.reason || "stopped";
     const reasonCode = extra.reasonCode || "";
     const dailySummary = extra.dailySummary || summarizeTasks(readTaskList(store, now).cards);
-    const goal = normalizeGoal(store);
+    const goal = extra.goal || effectiveGoal(store, now);
     const dailyEnabled = extra.dailyEnabled != null ? extra.dailyEnabled : goalEnablesDaily(goal);
     const dailyDone = extra.dailyDone != null
       ? extra.dailyDone
@@ -658,8 +896,10 @@ const BingAssistant = (() => {
 
   function buildViewModel(store, now = new Date()) {
     const count = readNumber(store, dailyCountKey(now), 0);
-    const limit = Math.max(1, readNumber(store, KEYS.limitSearchCount, DEFAULT_SEARCH_LIMIT));
-    const goal = normalizeGoal(store);
+    const weekdayLimit = Math.max(1, readNumber(store, KEYS.limitSearchCount, DEFAULT_SEARCH_LIMIT));
+    const weekdayGoal = normalizeGoal(store);
+    const limit = effectiveSearchLimit(store, now);
+    const goal = effectiveGoal(store, now);
     const dailyEnabled = goalEnablesDaily(goal);
     const dailyDone = store[dailyTasksDoneKey(now)] === true || store[dailyTasksDoneKey(now)] === "true";
     const loginState = store[KEYS.loginState] || "unknown";
@@ -718,8 +958,14 @@ const BingAssistant = (() => {
       pauseText: pauseStatusText(pauseReason),
       count,
       limit,
+      weekdayLimit,
+      weekdayGoal,
+      weekdayGoalLabel: goalLabel(weekdayGoal),
       goal,
       goalLabel: goalLabel(goal),
+      weekendGoal: normalizeWeekendGoal(store[KEYS.weekendGoal]),
+      weekendGoalLabel: weekendGoalLabel(store[KEYS.weekendGoal]),
+      weekendSearchLimit: Number(store[KEYS.weekendSearchLimit]) > 0 ? Math.round(Number(store[KEYS.weekendSearchLimit])) : "",
       dailyEnabled,
       dailyDone,
       dailySummary,
@@ -765,7 +1011,22 @@ const BingAssistant = (() => {
       mobileCount: readNumber(store, dailyMobileCountKey(now), 0),
       catchUpEnabled: store[KEYS.catchUpEnabled] !== false,
       catchUpAsk: store[KEYS.catchUpAsk] === true,
-      quizAssistEnabled: store[KEYS.quizAssistEnabled] === true
+      missedRemindEnabled: store[KEYS.missedRemindEnabled] !== false,
+      quizAssistEnabled: store[KEYS.quizAssistEnabled] === true,
+      weekCells: buildWeekCells(store, now),
+      streakDays: consecutiveCompleteDays(store, now),
+      streakLine: streakLine(store, now),
+      missedYesterday: yesterdayMissed(store, now),
+      continueHint: continueHint({
+        count,
+        limit,
+        dailyEnabled,
+        dailyDone,
+        failReasonCode,
+        failMessage: lastError || fail.message
+      }),
+      showWhatsNew: shouldShowWhatsNew(store),
+      whatsNew: whatsNewCopy()
     };
   }
 
@@ -789,6 +1050,10 @@ const BingAssistant = (() => {
     MAX_SEARCH_INTERVAL,
     DEFAULT_INTERVAL_MIN,
     DEFAULT_INTERVAL_MAX,
+    PRODUCT_VERSION,
+    DAY_RECORD_KEEP_DAYS,
+    DAY_RECORD_SHOW_DAYS,
+    WEEKEND_GOAL_SAME,
     WEEKDAY_NAMES,
     WORD_PACK_SHORT,
     WORD_PACK_LONG,
@@ -823,6 +1088,24 @@ const BingAssistant = (() => {
     isPaused,
     normalizeRepeatRule,
     isScheduledDay,
+    isWeekend,
+    shiftLocalDate,
+    normalizeWeekendGoal,
+    weekendGoalLabel,
+    effectiveGoal,
+    effectiveSearchLimit,
+    readDayRecords,
+    pruneDayRecords,
+    upsertDayRecord,
+    buildWeekCells,
+    consecutiveCompleteDays,
+    yesterdayMissed,
+    streakLine,
+    shouldRemindMissed,
+    buildDayRecord,
+    continueHint,
+    whatsNewCopy,
+    shouldShowWhatsNew,
     normalizeIntervalRange,
     randomSearchDelayMs,
     pauseStatusText,

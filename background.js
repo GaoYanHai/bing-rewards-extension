@@ -51,19 +51,71 @@ async function openOrWakeRewardsTab() {
   return created.id;
 }
 
-async function notify(id, message) {
+const CATCHUP_NOTE_ID = "bing-assistant-catchup";
+const MISSED_NOTE_ID = "bing-assistant-missed";
+const CATCHUP_BUTTONS = [{ title: "现在补做" }, { title: "今天算了" }];
+
+async function notify(id, message, extra = {}) {
   const store = await readStore();
-  if (store[KEYS.notifyEnabled] === false) return;
-  try {
-    await chrome.notifications.create(id, {
-      type: "basic",
-      iconUrl: "icons/icon128.png",
-      title: A.PRODUCT_NAME_ZH,
-      message
-    });
-  } catch (error) {
-    console.warn("[BingAssistant] notification failed", error);
+  if (extra.force !== true && store[KEYS.notifyEnabled] === false) return;
+  const options = {
+    type: "basic",
+    iconUrl: "icons/icon128.png",
+    title: A.PRODUCT_NAME_ZH,
+    message
+  };
+  if (extra.buttons) {
+    options.buttons = extra.buttons;
+    options.requireInteraction = true;
   }
+  try {
+    await chrome.notifications.create(id, options);
+  } catch (error) {
+    if (extra.buttons) {
+      try {
+        delete options.buttons;
+        delete options.requireInteraction;
+        await chrome.notifications.create(id, options);
+      } catch (fallbackError) {
+        console.warn("[BingAssistant] notification failed", fallbackError);
+      }
+    } else {
+      console.warn("[BingAssistant] notification failed", error);
+    }
+  }
+}
+
+function dayRecordPatch(store, extra = {}) {
+  const record = A.buildDayRecord(store, extra);
+  if (!record) return {};
+  return { [KEYS.dayRecords]: A.upsertDayRecord(store[KEYS.dayRecords], record) };
+}
+
+async function markPromptedToday(now = new Date()) {
+  const today = A.localDateString(now);
+  await chrome.storage.local.set({
+    [KEYS.catchUpPrompted]: today,
+    [KEYS.missedReminded]: today
+  });
+}
+
+async function dismissToday(now = new Date()) {
+  const today = A.localDateString(now);
+  await chrome.storage.local.set({
+    [KEYS.catchUpPrompted]: today,
+    [KEYS.catchUpDismissed]: today,
+    [KEYS.missedReminded]: today
+  });
+}
+
+async function startFromPrompt(reason = "catchup") {
+  const now = new Date();
+  await markPromptedToday(now);
+  const result = await startToday(reason);
+  if (result.ok) {
+    await chrome.storage.local.set({ [A.triggeredKey(now)]: "true" });
+  }
+  return result;
 }
 
 function withLog(store, event) {
@@ -128,6 +180,10 @@ async function applyDefaultsIfNeeded() {
   if (store[KEYS.pauseWhenBusy] === undefined) patch[KEYS.pauseWhenBusy] = true;
   if (store[KEYS.repeatRule] === undefined) patch[KEYS.repeatRule] = A.REPEAT.DAILY;
   if (store[KEYS.userTaskAction] === undefined) patch[KEYS.userTaskAction] = "";
+  if (store[KEYS.dayRecords] === undefined) patch[KEYS.dayRecords] = [];
+  if (store[KEYS.weekendGoal] === undefined) patch[KEYS.weekendGoal] = A.WEEKEND_GOAL_SAME;
+  if (store[KEYS.weekendSearchLimit] === undefined) patch[KEYS.weekendSearchLimit] = "";
+  if (store[KEYS.missedRemindEnabled] === undefined) patch[KEYS.missedRemindEnabled] = true;
   if (A.LEGACY_CHANNELS.includes(store[KEYS.selectedChannel])) {
     patch[KEYS.selectedChannel] = A.WORD_PACK_SHORT;
   } else if (!store[KEYS.selectedChannel]) {
@@ -162,7 +218,9 @@ async function startToday(reason = "manual") {
 
   const action = reason === "alarm"
     ? "已到设定时间，正在开始今天的任务"
-    : (reason === "catchup" ? "正在补做今天的任务" : "开始今日任务");
+    : (reason === "catchup"
+      ? "正在补做今天的任务"
+      : (reason === "missed" ? "昨天还没做完，正在开始今天的任务" : "开始今日任务"));
   const startPoints = A.readablePoints(store[KEYS.pointsBalance]);
   await chrome.storage.local.set({
     [KEYS.autoSearchLock]: "on",
@@ -186,19 +244,25 @@ async function startToday(reason = "manual") {
     ...clearRunFlags()
   });
 
-  await openOrWakeSearchTab();
+  if (model.count >= model.limit && model.dailyEnabled && !model.dailyDone) {
+    await openOrWakeRewardsTab();
+  } else {
+    await openOrWakeSearchTab();
+  }
   await updateBadge();
   return { ok: true };
 }
 
 async function stopToday(message = "已停止") {
   const store = await readStore();
+  const model = A.buildViewModel(store);
   await chrome.storage.local.set({
     [KEYS.autoSearchLock]: "off",
     [KEYS.productState]: "ready",
     [KEYS.waitingUserTask]: null,
     [KEYS.lastStatusMessage]: message,
     [KEYS.runLogs]: withLog(store, { action: "已停止", result: message }),
+    ...dayRecordPatch(store, { reason: "stopped", count: model.count, limit: model.limit }),
     ...clearRunFlags()
   });
   await updateBadge();
@@ -290,26 +354,14 @@ async function confirmWaitingTask() {
 
 async function startDailyRun(reason = "alarm") {
   const now = new Date();
-  const store = await chrome.storage.local.get([
-    A.triggeredKey(now),
-    A.dailyCountKey(now),
-    KEYS.limitSearchCount,
-    KEYS.riskAccepted,
-    KEYS.loginState,
-    KEYS.enableDailyTasks,
-    KEYS.todayGoal,
-    KEYS.repeatRule,
-    A.dailyTasksDoneKey(now)
-  ]);
+  const store = await readStore();
   if (store[KEYS.riskAccepted] !== true) return;
   if (!A.isScheduledDay(now, store[KEYS.repeatRule])) return;
+  if (reason === "catchup" && store[KEYS.catchUpDismissed] === A.localDateString(now)) return;
   const alreadyTriggered = store[A.triggeredKey(now)] === "true" || store[A.triggeredKey(now)] === true;
-  const count = Number(store[A.dailyCountKey(now)] ?? 0);
-  const limit = Number(store[KEYS.limitSearchCount] ?? A.DEFAULT_SEARCH_LIMIT);
-  const goal = A.normalizeGoal(store);
-  const dailyDone = store[A.dailyTasksDoneKey(now)] === true || store[A.dailyTasksDoneKey(now)] === "true";
+  const model = A.buildViewModel(store, now);
   if (alreadyTriggered) return;
-  if (count >= limit && (!A.goalEnablesDaily(goal) || dailyDone)) return;
+  if (model.count >= model.limit && (!model.dailyEnabled || model.dailyDone)) return;
   if (store[KEYS.loginState] === "out") {
     await openOrWakeSearchTab();
     await notify("bing-assistant-login", "还没有登录微软账号，今天的任务还没开始。");
@@ -332,18 +384,30 @@ async function catchUpIfNeeded() {
   if (now.getTime() < scheduledToday.getTime()) return;
   const store = await readStore();
   if (store[KEYS.catchUpEnabled] === false) return;
-  if (store[KEYS.catchUpAsk] === true) {
-    const today = A.localDateString(now);
+  const today = A.localDateString(now);
+  if (store[KEYS.catchUpDismissed] === today) return;
+  if (store[KEYS.catchUpAsk] === true && store[KEYS.notifyEnabled] !== false) {
     if (store[KEYS.catchUpPrompted] === today) return;
-    await chrome.storage.local.set({ [KEYS.catchUpPrompted]: today });
-    await notify("bing-assistant-catchup", "现在补做今天的任务吗？点这里开始。");
+    await markPromptedToday(now);
+    await notify(CATCHUP_NOTE_ID, "现在补做今天的任务吗？", { buttons: CATCHUP_BUTTONS });
     return;
   }
   await startDailyRun("catchup");
 }
 
+async function maybeRemindMissed() {
+  const store = await readStore();
+  if (!A.shouldRemindMissed(store)) return false;
+  await markPromptedToday();
+  await notify(MISSED_NOTE_ID, "昨天的电脑搜索还没做完，要现在补做吗？", {
+    force: true,
+    buttons: CATCHUP_BUTTONS
+  });
+  return true;
+}
+
 function refreshKeywordPlan(store) {
-  const limit = Math.max(1, A.readNumber(store, KEYS.limitSearchCount, A.DEFAULT_SEARCH_LIMIT));
+  const limit = Math.max(1, A.effectiveSearchLimit(store));
   return A.buildKeywordPlan(store, limit + 10);
 }
 
@@ -352,7 +416,13 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void applyDefaultsIfNeeded().then(scheduleNextAlarm).then(catchUpIfNeeded).then(updateBadge);
+  void applyDefaultsIfNeeded()
+    .then(scheduleNextAlarm)
+    .then(async () => {
+      const reminded = await maybeRemindMissed();
+      if (!reminded) await catchUpIfNeeded();
+    })
+    .then(updateBadge);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -361,14 +431,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.notifications.onClicked.addListener((id) => {
-  if (id !== "bing-assistant-catchup") return;
-  void startToday("catchup").then((result) => {
-    if (result.ok) {
-      const now = new Date();
-      return chrome.storage.local.set({ [A.triggeredKey(now)]: "true" });
-    }
-    return undefined;
-  });
+  if (id !== CATCHUP_NOTE_ID && id !== MISSED_NOTE_ID) return;
+  void startFromPrompt(id === MISSED_NOTE_ID ? "missed" : "catchup");
+});
+
+chrome.notifications.onButtonClicked.addListener((id, buttonIndex) => {
+  if (id !== CATCHUP_NOTE_ID && id !== MISSED_NOTE_ID) return;
+  if (buttonIndex === 0) void startFromPrompt(id === MISSED_NOTE_ID ? "missed" : "catchup");
+  else void dismissToday();
+});
+
+chrome.notifications.onClosed.addListener((id, byUser) => {
+  if (!byUser) return;
+  if (id !== CATCHUP_NOTE_ID && id !== MISSED_NOTE_ID) return;
+  void dismissToday();
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -419,6 +495,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (type === "SET_TODAY_GOAL") {
     chrome.storage.local.set(syncGoalPatch(message.goal)).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (type === "DISMISS_WHATS_NEW") {
+    chrome.storage.local.set({ [KEYS.whatsNewSeen]: A.PRODUCT_VERSION }).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (type === "SHOW_WHATS_NEW") {
+    chrome.storage.local.set({ [KEYS.whatsNewSeen]: "" }).then(() => sendResponse({ ok: true }));
     return true;
   }
   if (type === "REFRESH_KEYWORDS") {
@@ -495,6 +579,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           action: reason === "complete" ? "今天的任务已完成" : "已停止",
           result: message.message || copy.message || summary.closingLine,
           reasonCode
+        }),
+        ...dayRecordPatch(store, {
+          reason,
+          reasonCode,
+          count,
+          limit,
+          at: Date.now()
         }),
         ...clearRunFlags()
       };

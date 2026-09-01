@@ -15,6 +15,11 @@ const stat2Value = document.getElementById("stat-2-value");
 const stat3Label = document.getElementById("stat-3-label");
 const stat3Value = document.getElementById("stat-3-value");
 const progressBar = document.getElementById("progress-bar");
+const weekRow = document.getElementById("week-row");
+const streakLine = document.getElementById("streak-line");
+const whatsNew = document.getElementById("whats-new");
+const whatsNewTitle = document.getElementById("whats-new-title");
+const whatsNewPoints = document.getElementById("whats-new-points");
 const primaryBtn = document.getElementById("primary-btn");
 const hint = document.getElementById("hint");
 const hintActions = document.getElementById("hint-actions");
@@ -48,6 +53,31 @@ function setHintActions(visible) {
   hintActions.hidden = !visible;
 }
 
+function renderWeek(model) {
+  const cells = model.weekCells || [];
+  if (!cells.length) {
+    weekRow.hidden = true;
+    weekRow.innerHTML = "";
+    streakLine.hidden = true;
+    return;
+  }
+  weekRow.hidden = false;
+  weekRow.innerHTML = cells.map((cell) => {
+    return `<div class="week-cell ${escapeHtml(cell.status)}" title="${escapeHtml(cell.title)}"><span>${escapeHtml(cell.weekday)}</span><i class="week-dot"></i></div>`;
+  }).join("");
+  streakLine.hidden = !model.streakLine;
+  streakLine.textContent = model.streakLine || "";
+}
+
+function renderWhatsNew(model, force) {
+  const copy = model.whatsNew || A.whatsNewCopy();
+  const show = force || model.showWhatsNew;
+  whatsNew.hidden = !show;
+  if (!show) return;
+  whatsNewTitle.textContent = copy.title;
+  whatsNewPoints.innerHTML = (copy.points || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+}
+
 function render(store) {
   const model = A.buildViewModel(store);
   const showRisk = !model.riskAccepted;
@@ -76,6 +106,8 @@ function render(store) {
   primaryBtn.disabled = false;
   stopLink.hidden = true;
   setHintActions(false);
+  renderWeek(model);
+  renderWhatsNew(model, whatsNew.dataset.force === "1");
   renderLogs(model);
 
   if (model.state === "logged_out") {
@@ -141,6 +173,7 @@ function render(store) {
     const bits = [];
     if (gained) bits.push(`大约 +${gained}`);
     bits.push(model.summary?.closingLine || model.closingLine);
+    if (model.streakDays > 0) bits.push(model.streakLine);
     hint.textContent = bits.filter(Boolean).join("。");
     primaryBtn.dataset.action = "open";
     return;
@@ -150,8 +183,8 @@ function render(store) {
     stateLine.textContent = "这次没有完成，已停止";
     stat3Label.textContent = "原因";
     stat3Value.textContent = model.failShort || "已停止";
-    primaryBtn.textContent = model.failReasonCode === A.FAIL_CODES.LOGIN ? "打开 Bing 并登录" : "重试";
-    hint.textContent = model.failMessage || model.failNext || "请确认已登录微软账号，然后重试。";
+    primaryBtn.textContent = model.failReasonCode === A.FAIL_CODES.LOGIN ? "打开 Bing 并登录" : "继续";
+    hint.textContent = model.continueHint || model.failMessage || "点继续会接着今天的进度，不会从头搜。";
     primaryBtn.dataset.action = model.failReasonCode === A.FAIL_CODES.LOGIN ? "login" : "start";
     return;
   }
@@ -212,7 +245,16 @@ document.getElementById("open-options").addEventListener("click", () => {
   chrome.runtime.openOptionsPage();
 });
 document.getElementById("open-bing").addEventListener("click", () => send("OPEN_BING"));
-document.getElementById("open-help").addEventListener("click", () => chrome.runtime.openOptionsPage());
+document.getElementById("whats-new-dismiss").addEventListener("click", async () => {
+  whatsNew.dataset.force = "";
+  await send("DISMISS_WHATS_NEW");
+  await refresh();
+});
+document.getElementById("open-help").addEventListener("click", async () => {
+  whatsNew.dataset.force = "1";
+  await send("SHOW_WHATS_NEW");
+  await refresh();
+});
 
 chrome.storage.onChanged.addListener((_changes, area) => {
   if (area === "local") void refresh();

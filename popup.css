@@ -151,3 +151,51 @@ footer {
   line-height: 1.45;
 }
 .log-box div + div { margin-top: 2px; }
+
+.whats-new {
+  background: var(--card);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.whats-new p { margin: 0 0 6px; font-weight: 600; }
+.whats-new ul { margin: 0 0 6px; padding-left: 18px; color: var(--muted); font-size: 12px; }
+.whats-new[hidden] { display: none; }
+.week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.week[hidden] { display: none; }
+.week-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 0 8px;
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 11px;
+}
+.week-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c8c6c4;
+}
+.week-cell.complete .week-dot { background: var(--ok); }
+.week-cell.failed .week-dot { background: var(--danger); }
+.week-cell.incomplete .week-dot { background: #c8c6c4; }
+.week-cell.today {
+  outline: 1px solid var(--accent);
+  color: var(--fg);
+}
+.week-cell.today .week-dot { background: var(--accent); }
+.streak-line {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.streak-line[hidden] { display: none; }
