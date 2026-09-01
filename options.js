@@ -107,9 +107,10 @@ function fill(store) {
   intervalMax.value = String(model.intervalMax);
   simulateTyping.checked = model.simulateTyping;
   pauseWhenBusy.checked = model.pauseWhenBusy;
-  mobileQuota.textContent = model.mobileEnabled
-    ? `${model.mobileCount}/${model.mobileLimit}（执行未启用）`
-    : "未启用";
+  const mobileLine = model.mobileQuotaLine || "还没打开过 Rewards 读取配额";
+  if (mobileQuota) mobileQuota.textContent = mobileLine;
+  const mobileBasic = document.getElementById("mobile-quota-basic");
+  if (mobileBasic) mobileBasic.textContent = mobileLine;
   keywordNote.textContent = model.keywordPlan?.note || A.KEYWORD_NOTE;
   if (model.keywordPlan?.fallback) {
     keywordNote.textContent = "自定义词库是空的，已改用日常短词。";

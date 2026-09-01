@@ -30,6 +30,15 @@ function send(type, extra = {}) {
   return chrome.runtime.sendMessage({ type, ...extra });
 }
 
+function withQuotaHint(text, model) {
+  const extra = model && model.quotaHint ? model.quotaHint : "";
+  if (!extra) return text || "";
+  const base = text || "";
+  if (!base) return extra;
+  const joiner = /[。！？.!?]$/.test(base) ? "" : "。";
+  return `${base}${joiner}${extra}`;
+}
+
 function renderLogs(model) {
   const logs = (model.logs || []).slice(0, 3);
   if (!logs.length) {
@@ -179,6 +188,9 @@ function render(store) {
     if (model.elapsedMs > 0) {
       hint.textContent = `已用时 ${A.formatDuration(model.elapsedMs)}。${hint.textContent}`;
     }
+    if (model.pcQuotaHint && !waitingName) {
+      hint.textContent = withQuotaHint(hint.textContent, { quotaHint: model.pcQuotaHint });
+    }
     if (waitingName) {
       setHintActions(true);
       if (!hint.textContent.includes("需要你点一下")) {
@@ -200,6 +212,7 @@ function render(store) {
     if (gained) bits.push(`大约 +${gained}`);
     bits.push(model.summary?.closingLine || model.closingLine);
     if (model.streakDays > 0) bits.push(model.streakLine);
+    if (model.mobileHint) bits.push(model.mobileHint);
     hint.textContent = bits.filter(Boolean).join("。");
     primaryBtn.dataset.action = "open";
     return;
@@ -219,9 +232,12 @@ function render(store) {
   stat3Label.textContent = "下次自动开始";
   stat3Value.textContent = model.schedule.enabled ? model.nextRunLabel : `未设置，建议${A.suggestedTimeLabel()}`;
   primaryBtn.textContent = "开始今日任务";
-  hint.textContent = model.dailyEnabled
-    ? `今日目标：${model.goalLabel}。完整电脑搜索大约 6-10 分钟。`
-    : "完整电脑搜索大约 6-10 分钟，期间请保持浏览器运行。";
+  hint.textContent = withQuotaHint(
+    model.dailyEnabled
+      ? `今日目标：${model.goalLabel}。完整电脑搜索大约 6-10 分钟。`
+      : "完整电脑搜索大约 6-10 分钟，期间请保持浏览器运行。",
+    model
+  );
   primaryBtn.dataset.action = "start";
 }
 

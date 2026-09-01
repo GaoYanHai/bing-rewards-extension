@@ -56,10 +56,7 @@ function GM_addStyle(cssText) {
     return style;
 }
 
-// 测试模式开关
-// 1: 开启测试模式。点击"开始"时，强制重置今日所有状态（用于调试）。
-// 0: 正常模式。智能判断是否已完成，完成后不再重复运行。
-const TEST_MODE = 0 // 0=正常模式, 1=测试模式(点击"开始"时强制重置今日所有状态)
+const TEST_MODE = 0;
 // 跨天检测用：从持久存储读取上次检查日期，首次运行时初始化为今天
 const SCRIPT_LOAD_DATE = GM_getValue("Rebang_LastCheckDate", getLocalDateStr());
 
@@ -759,64 +756,6 @@ function getDailyTasksDoneKey() {
 }
 
 // ==========================================
-// 【新增优化】防休眠与死页自动复活模块
-// 解决浏览器后台冻结页面导致定时任务失效的问题
-// ==========================================
-var _antiSleepInitialized = false; // 修复：防止递归调用导致多个 setInterval 累加
-
-function initAntiSleepProtection() {
-    // 修复：如果已经初始化过，只重新申请唤醒锁，不再创建新的 setInterval
-    if (_antiSleepInitialized) {
-        // 唤醒锁被释放后，只需重新申请，不需要重建心跳
-        if ('wakeLock' in navigator) {
-            try {
-                navigator.wakeLock.request('screen').then(lock => {
-                    console.log("[Rebang] 唤醒锁已重新获取");
-                    lock.addEventListener('release', () => {
-                        console.log('[Rebang] 唤醒锁被释放，正在重新申请...');
-                        initAntiSleepProtection();
-                    });
-                }).catch(e => {});
-            } catch (e) {}
-        }
-        return;
-    }
-    _antiSleepInitialized = true;
-
-    console.log("[Rebang] 启动防休眠保护系统...");
-
-    // 1. 申请屏幕唤醒锁 (降低被浏览器判定为闲置的概率)
-    if ('wakeLock' in navigator) {
-        try {
-            navigator.wakeLock.request('screen').then(lock => {
-                console.log("[Rebang] 屏幕唤醒锁已获取 (Screen WakeLock Active)");
-                lock.addEventListener('release', () => {
-                    console.log('[Rebang] 唤醒锁被释放，正在重新申请...');
-                    initAntiSleepProtection();
-                });
-            }).catch(e => console.log("[Rebang] 唤醒锁获取受阻:", e));
-        } catch (e) {}
-    }
-
-    // 2. 强力心跳检测 (检测页面是否刚刚从"假死"中醒来)
-    let lastHeartbeat = Date.now();
-    const checkInterval = 2000; // 每2秒跳动一次
-    const freezeThreshold = 15000; // 阈值：如果超过15秒没跳动，判定为曾被冻结
-
-    setInterval(() => {
-        const now = Date.now();
-        const timeDiff = now - lastHeartbeat;
-
-        // 检测是否发生过"时间跳跃"（即页面被挂起）
-        if (timeDiff > freezeThreshold) {
-            console.warn(`[Rebang] 页面曾暂停 ${timeDiff / 1000}秒，已继续等待，不刷新当前页。`);
-        }
-
-        lastHeartbeat = now;
-    }, checkInterval);
-}
-
-// ==========================================
 // 核心逻辑：获取积分 (深度修复版)
 // ==========================================
 
@@ -1249,6 +1188,57 @@ function isQuizOrVotePage() {
     return BingAssistant.isQuizOrVotePage(window.location, document);
 }
 
+function quizPageKind() {
+    const href = `${location.pathname || ""} ${location.search || ""} ${location.href || ""}`;
+    if (/poll|thisorthat|vote/.test(href.toLowerCase())) return "vote";
+    try {
+        if (document.querySelector(BingAssistant.TASK_SELECTORS.votePage)) return "vote";
+    } catch (error) {}
+    return "quiz";
+}
+
+function quizPageNextStep(name) {
+    let nodeCount = 0;
+    try {
+        nodeCount = document.querySelectorAll(BingAssistant.QUOTA_SELECTORS.quizCount).length;
+    } catch (error) {}
+    const bodyText = ((document.body && document.body.innerText) || "").slice(0, 4000);
+    const total = BingAssistant.parseQuizQuestionTotal(bodyText, nodeCount);
+    return BingAssistant.formatQuizNextStep(quizPageKind(), total, name || "");
+}
+
+function saveRewardsQuotasIfAny() {
+    if (!isRewardsDashboard()) return;
+    try {
+        const texts = [];
+        $(BingAssistant.QUOTA_SELECTORS.cards).each(function() {
+            const text = ($(this).text() || "").replace(/\s+/g, " ").trim();
+            if (text) texts.push(text);
+        });
+        const breakdown = ($(BingAssistant.QUOTA_SELECTORS.breakdown).text() || "").replace(/\s+/g, " ").trim();
+        if (breakdown) texts.push(breakdown);
+        const parsed = BingAssistant.parseQuotaCards(texts);
+        const dailySection = $(BingAssistant.QUOTA_SELECTORS.dailySection).first();
+        if (dailySection.length) {
+            const $cards = dailySection.find(BingAssistant.TASK_SELECTORS.cards);
+            if ($cards.length) {
+                let done = 0;
+                $cards.each(function() {
+                    if ($(this).find(BingAssistant.TASK_SELECTORS.completed).length) done += 1;
+                });
+                parsed.daily = parsed.daily || {
+                    current: done,
+                    total: $cards.length,
+                    remaining: Math.max(0, $cards.length - done)
+                };
+            }
+        }
+        if (!parsed.pc && !parsed.mobile && !parsed.daily) return;
+        const prev = BingAssistant.readQuotaSnapshot(rebangExtensionStore);
+        setVal(BingAssistant.KEYS.quotaSnapshot, BingAssistant.mergeQuotaSnapshot(prev, parsed));
+    } catch (error) {}
+}
+
 function isRewardsDashboard() {
     if (isQuizOrVotePage()) return false;
     if (BingAssistant.isRewardsDashboardPath(location.pathname)) return true;
@@ -1320,7 +1310,8 @@ function renderTaskList(cards) {
     if (!box.length) return;
     const list = Array.isArray(cards) ? cards : [];
     const summary = BingAssistant.summarizeTasks(list);
-    $("#ext-task-summary").text(`每日活动 ${BingAssistant.formatDailyProgress(summary, dailyTasksWanted(), getVal(getDailyTasksDoneKey(), false) === true)}`);
+    const quota = BingAssistant.readQuotaSnapshot(rebangExtensionStore);
+    $("#ext-task-summary").text(`每日活动 ${BingAssistant.formatDailyProgress(summary, dailyTasksWanted(), getVal(getDailyTasksDoneKey(), false) === true, quota && quota.daily)}`);
     if (!list.length) {
         box.html('<div class="rebang-log">还没有识别到活动卡片</div>');
         return;
@@ -1418,6 +1409,8 @@ async function handleRewardsPage() {
         renderTaskList(BingAssistant.readTaskList(rebangExtensionStore).cards);
     }
 
+    saveRewardsQuotasIfAny();
+
     if (isLocked !== "on") return;
     rememberStartPoints(currentPoints);
     if (isRunPaused()) {
@@ -1494,7 +1487,7 @@ async function handleRewardsPage() {
             return;
         }
         if (isLocked !== "on") {
-            showUserMessage("这是测验页。开始今日任务后，可以在这里确认或跳过。");
+            showUserMessage("这是测验或投票页。开始今日任务后，可以在这里确认或跳过。");
             setUserTaskButtons(false);
             return;
         }
@@ -1505,9 +1498,7 @@ async function handleRewardsPage() {
             setUserTaskButtons(!!(waitingNow && waitingNow.url));
             return;
         }
-        showUserMessage(waitingNow && waitingNow.name
-            ? `这是测验页：${waitingNow.name}。请自己作答，然后点「我点完了」或「跳过这张」。`
-            : "这是测验页。请自己作答，然后点「我点完了」或「跳过这张」。");
+        showUserMessage(quizPageNextStep(waitingNow && waitingNow.name));
         setUserTaskButtons(true);
         return;
     }
