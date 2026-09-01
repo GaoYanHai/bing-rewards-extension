@@ -116,6 +116,9 @@
     <section>
       <h2>今日日志</h2>
       <div id="log-list" class="log-list">还没有今天的日志。</div>
+      <div class="toolbar">
+        <button id="export-logs" type="button">导出日志</button>
+      </div>
     </section>
 
     <section>
@@ -158,26 +161,40 @@
     </section>
 
     <section class="danger">
-      <details>
-        <summary>危险设置</summary>
-        <label class="row">
-          <span>启用移动搜索配额展示</span>
-          <input type="checkbox" id="mobile-enabled">
-        </label>
-        <p class="help">2.0 只展示配额，不会改 User-Agent，也不会真的做移动搜索。</p>
-        <label class="row">
-          <span>自动处理测验</span>
-          <input type="checkbox" id="quiz-assist" disabled>
-        </label>
-        <p class="help">暂不自动作答。2.0 仍然只会提示你点一下。</p>
-        <label class="stack">
-          <span>自定义 User-Agent</span>
-          <input type="text" id="custom-ua" disabled placeholder="暂不支持">
+      <h2>危险设置</h2>
+      <label class="row">
+        <span>启用危险设置</span>
+        <input type="checkbox" id="danger-enabled">
+      </label>
+      <p class="help">默认关闭。打开后才能使用下面这些更高风险的选项，且仍需你逐项打开。</p>
+      <div id="danger-confirm" class="danger-confirm" hidden>
+        <p>这些选项可能增加积分无效或账号受限的风险。请确认你了解后再启用。</p>
+        <label class="check-row">
+          <input type="checkbox" id="danger-ack">
+          <span>我已了解风险，仍要启用</span>
         </label>
         <div class="toolbar">
-          <button id="export-logs" type="button">导出日志</button>
+          <button id="danger-confirm-btn" type="button" disabled>确认启用</button>
+          <button id="danger-cancel-btn" type="button">取消</button>
         </div>
-      </details>
+      </div>
+      <div id="danger-body" class="danger-body" hidden>
+        <label class="row">
+          <span>允许高风险活动</span>
+          <input type="checkbox" id="high-risk-enabled">
+        </label>
+        <p class="help">默认跳过安装、购物、问卷等卡片。打开后会停下来让你自己点，不会自动完成。需把今日目标设成“尽量全做”。</p>
+        <label class="row">
+          <span>自动点开测验和投票</span>
+          <input type="checkbox" id="quiz-assist">
+        </label>
+        <p class="help">打开后会自动点开测验卡片。题目仍需你自己选，不会自动作答。需把今日目标设成“尽量全做”。</p>
+        <label class="row">
+          <span>显示移动搜索配额</span>
+          <input type="checkbox" id="mobile-enabled">
+        </label>
+        <p class="help">只展示配额，不会改成手机搜索，也不会修改 User-Agent。</p>
+      </div>
     </section>
 
     <section>

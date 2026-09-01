@@ -1223,7 +1223,7 @@ function scanRewardCards() {
         const completed = $card.find(selectors.completed).length > 0;
         const locked = $card.find(selectors.locked).length > 0;
         if (!url || url.indexOf("http") !== 0) return;
-        const classified = BingAssistant.classifyTask(name, url);
+        const classified = BingAssistant.classifyTask(name, url, rebangExtensionStore);
         const prev = prevByUrl.get(url);
         let status = classified.status;
         let reason = classified.reason;
@@ -1292,6 +1292,10 @@ function pickNextTask(cards) {
     });
     const autoCard = actionable.find((card) => card.kind === BingAssistant.TASK_KIND.EXPLORE && card.status === BingAssistant.TASK_STATUS.AUTO);
     if (autoCard) return { card: autoCard, mode: "auto" };
+    if (goal === BingAssistant.GOALS.TRY_ALL && BingAssistant.allowsQuizAssist(rebangExtensionStore)) {
+        const quizCard = actionable.find((card) => card.kind === BingAssistant.TASK_KIND.QUIZ || card.kind === BingAssistant.TASK_KIND.VOTE);
+        if (quizCard) return { card: quizCard, mode: "auto" };
+    }
     if (goal === BingAssistant.GOALS.TRY_ALL) {
         const manualCard = actionable.find((card) => card.status === BingAssistant.TASK_STATUS.MANUAL);
         if (manualCard) return { card: manualCard, mode: "manual" };
