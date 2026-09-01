@@ -53,10 +53,16 @@
       <div class="progress" aria-hidden="true"><i id="progress-bar"></i></div>
       <button id="primary-btn" class="primary">开始今日任务</button>
       <p id="hint" class="hint"></p>
+      <div id="hint-actions" class="hint-actions" hidden>
+        <button id="task-done" class="link" type="button">我点完了</button>
+        <button id="task-skip" class="link" type="button">跳过这张</button>
+        <button id="task-open" class="link" type="button">去处理</button>
+      </div>
       <div id="log-box" class="log-box" hidden></div>
       <footer>
         <button id="open-options" class="link" type="button">设置</button>
         <button id="open-bing" class="link" type="button">打开 Bing</button>
+        <button id="stop-link" class="link stop-link" type="button" hidden>停止</button>
         <button id="open-help" class="link" type="button">说明</button>
       </footer>
     </section>

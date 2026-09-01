@@ -17,7 +17,9 @@ const stat3Value = document.getElementById("stat-3-value");
 const progressBar = document.getElementById("progress-bar");
 const primaryBtn = document.getElementById("primary-btn");
 const hint = document.getElementById("hint");
+const hintActions = document.getElementById("hint-actions");
 const logBox = document.getElementById("log-box");
+const stopLink = document.getElementById("stop-link");
 
 function send(type, extra = {}) {
   return chrome.runtime.sendMessage({ type, ...extra });
@@ -40,6 +42,10 @@ function escapeHtml(str) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function setHintActions(visible) {
+  hintActions.hidden = !visible;
 }
 
 function render(store) {
@@ -66,8 +72,10 @@ function render(store) {
 
   const percent = Math.min(100, Math.round((model.count / model.limit) * 100));
   progressBar.style.width = `${percent}%`;
-  primaryBtn.classList.toggle("stop", model.state === "running");
+  primaryBtn.classList.remove("stop");
   primaryBtn.disabled = false;
+  stopLink.hidden = true;
+  setHintActions(false);
   renderLogs(model);
 
   if (model.state === "logged_out") {
@@ -80,38 +88,60 @@ function render(store) {
     return;
   }
 
-  if (model.state === "running") {
+  if (model.state === "running" || model.state === "paused") {
+    stopLink.hidden = false;
+    const waitingName = model.waitingTask?.name || "";
     if (model.count >= model.limit && model.dailyEnabled) {
-      stateLine.textContent = model.waitingTask
-        ? `需要你点一下：${model.waitingTask.name || "每日活动"}`
-        : "正在处理每日活动";
+      stateLine.textContent = waitingName
+        ? `需要你点一下：${waitingName}`
+        : (model.state === "paused" ? model.pauseText : "正在处理每日活动");
       stat3Label.textContent = "当前活动";
-      stat3Value.textContent = model.waitingTask?.name || model.keyword || "读取任务清单";
+      stat3Value.textContent = waitingName || model.keyword || "读取任务清单";
+    } else if (model.state === "paused") {
+      stateLine.textContent = model.pauseText;
+      stat3Label.textContent = "当前搜索";
+      stat3Value.textContent = model.keyword || `${model.count}/${model.limit}`;
     } else {
       stateLine.textContent = `正在搜索 ${model.count}/${model.limit}`;
       stat3Label.textContent = "当前搜索";
       stat3Value.textContent = model.keyword || "准备中";
     }
-    primaryBtn.textContent = "停止";
-    hint.textContent = model.statusMessage || "正在模拟常规搜索，间隔 8-14 秒。";
+
+    if (model.state === "paused") {
+      primaryBtn.textContent = "继续";
+      primaryBtn.dataset.action = "resume";
+      hint.textContent = model.pauseReason === A.PAUSE_REASONS.BUSY
+        ? "你正在用电脑，已暂时停下。条件消失后会自动继续。"
+        : "已暂停，进度还在。点继续即可接着做。";
+    } else {
+      primaryBtn.textContent = "暂停";
+      primaryBtn.dataset.action = "pause";
+      hint.textContent = model.statusMessage || `正在模拟常规搜索，间隔 ${model.intervalMin}-${model.intervalMax} 秒。`;
+    }
     if (model.elapsedMs > 0) {
       hint.textContent = `已用时 ${A.formatDuration(model.elapsedMs)}。${hint.textContent}`;
     }
-    primaryBtn.dataset.action = "stop";
+    if (waitingName) {
+      setHintActions(true);
+      if (!hint.textContent.includes("需要你点一下")) {
+        hint.textContent = `需要你点一下：${waitingName}。点完后回来确认，或跳过这张。`;
+      }
+    }
     return;
   }
 
   if (model.state === "complete") {
     const duration = model.summary?.durationMs || model.elapsedMs;
+    const gained = model.summary?.pointsGained || model.pointsGained;
     stateLine.textContent = model.dailyEnabled ? "今天的任务已完成" : "今天的电脑搜索已完成";
+    stat2Value.textContent = model.dailyResult;
     stat3Label.textContent = "用时";
     stat3Value.textContent = duration ? A.formatDuration(duration) : "已完成";
     primaryBtn.textContent = "打开 Bing";
-    hint.textContent = model.dailyEnabled
-      ? (model.dailyDone || model.dailySummary.autoPending === 0
-        ? (model.dailySummary.manual > 0 ? `还有 ${model.dailySummary.manual} 个活动需要你点一下。` : "每日活动已处理。")
-        : "每日活动仍待处理。")
-      : "未处理每日活动（安全模式已开）";
+    const bits = [];
+    if (gained) bits.push(`大约 +${gained}`);
+    bits.push(model.summary?.closingLine || model.closingLine);
+    hint.textContent = bits.filter(Boolean).join("。");
     primaryBtn.dataset.action = "open";
     return;
   }
@@ -153,10 +183,29 @@ riskAccept.addEventListener("click", async () => {
 
 primaryBtn.addEventListener("click", async () => {
   const action = primaryBtn.dataset.action;
-  if (action === "stop") await send("STOP_TODAY");
+  if (action === "pause") await send("PAUSE_TODAY");
+  else if (action === "resume") await send("RESUME_TODAY");
+  else if (action === "stop") await send("STOP_TODAY");
   else if (action === "login" || action === "open") await send("OPEN_BING");
   else await send("START_TODAY");
   await refresh();
+});
+
+stopLink.addEventListener("click", async () => {
+  await send("STOP_TODAY");
+  await refresh();
+});
+
+document.getElementById("task-done").addEventListener("click", async () => {
+  await send("USER_TASK_DONE");
+  await refresh();
+});
+document.getElementById("task-skip").addEventListener("click", async () => {
+  await send("USER_TASK_SKIP");
+  await refresh();
+});
+document.getElementById("task-open").addEventListener("click", async () => {
+  await send("OPEN_REWARDS");
 });
 
 document.getElementById("open-options").addEventListener("click", () => {

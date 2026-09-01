@@ -115,6 +115,14 @@ html, body {
   color: var(--muted);
   font-size: 12px;
 }
+.hint-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.hint-actions[hidden] { display: none; }
+.stop-link { color: var(--danger) !important; }
 footer {
   display: flex;
   justify-content: space-between;
