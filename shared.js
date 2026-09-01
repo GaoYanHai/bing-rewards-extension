@@ -14,7 +14,7 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "2.1.0";
+  const PRODUCT_VERSION = "2.2.0";
   const DAY_RECORD_KEEP_DAYS = 14;
   const DAY_RECORD_SHOW_DAYS = 7;
   const WEEKEND_GOAL_SAME = "same";
@@ -93,6 +93,13 @@ const BingAssistant = (() => {
     votePage: ".bt_poll, [data-bi-id*='poll'], [data-bi-id*='thisorthat']"
   };
 
+  const QUOTA_SELECTORS = {
+    cards: "mee-card, mee-rewards-daily-set-item-content, .c-card-content, .rewards-card, mee-rewards-point-breakdown, .pointsBreakdown",
+    breakdown: "#pointsBreakdown, .pointsBreakdown, mee-rewards-points-breakdown, .points-breakdown, mee-rewards-user-status-banner",
+    dailySection: "mee-rewards-daily-set-section, #daily-sets, .daily-set-section, [id*='dailySet'], [id*='daily-set']",
+    quizCount: ".rqQ, .rqQuestion, .wk_Circle, .TriviaOverlayData li, [aria-label*='Question']"
+  };
+
   const KEYS = {
     autoSearchLock: "Rebang_AutoSearchLock",
     enableDailyTasks: "Rebang_EnableDailyTasks",
@@ -160,7 +167,8 @@ const BingAssistant = (() => {
     missedRemindEnabled: "Rebang_MissedRemindEnabled",
     missedReminded: "Rebang_MissedReminded",
     catchUpDismissed: "Rebang_CatchUpDismissed",
-    whatsNewSeen: "Rebang_WhatsNewSeen"
+    whatsNewSeen: "Rebang_WhatsNewSeen",
+    quotaSnapshot: "Rebang_QuotaSnapshot"
   };
 
   const SHORT_KEYWORD_POOL = [
@@ -489,11 +497,11 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "2.1 卡住时也知道下一步",
+      title: "2.2 能看见今天还剩多少",
       points: [
-        "选项页和 Rewards 现场条更整齐",
-        "测验页会认出来，不会当成找不到卡片",
-        "可以导出 / 导入本机设置"
+        "打开过 Rewards 后，会尽量显示页面上的剩余次数",
+        "移动搜索只提醒，不会自动做",
+        "测验页会告诉你选完后点「我点完了」"
       ]
     };
   }
@@ -789,6 +797,121 @@ const BingAssistant = (() => {
     return false;
   }
 
+  function classifyQuotaKind(text) {
+    const t = String(text || "").toLowerCase();
+    if (/mobile search|移动(设备)?搜索|手机搜索|via mobile|bing mobile/.test(t)) return "mobile";
+    if (/pc search|desktop search|computer search|电脑搜索|电脑上搜索/.test(t)) return "pc";
+    if (/search on bing/.test(t) && !/mobile|手机|移动/.test(t)) return "pc";
+    if (/daily set|每日任务|今日任务|daily check/.test(t)) return "daily";
+    return "";
+  }
+
+  function normalizeQuotaPair(current, total) {
+    const cur = Number(current);
+    const tot = Number(total);
+    if (!Number.isFinite(cur) || !Number.isFinite(tot) || tot <= 0) return null;
+    if (cur < 0 || cur > tot * 2) return null;
+    if (tot >= 45 && tot <= 180 && tot % 3 === 0 && cur % 3 === 0) {
+      return {
+        current: cur / 3,
+        total: tot / 3,
+        remaining: Math.max(0, (tot - cur) / 3)
+      };
+    }
+    return {
+      current: cur,
+      total: tot,
+      remaining: Math.max(0, tot - cur)
+    };
+  }
+
+  function parseQuotaFraction(text) {
+    const raw = String(text || "").replace(/,/g, "");
+    let match = raw.match(/(\d+)\s*(?:\/|of|／)\s*(\d+)/i);
+    if (match) return normalizeQuotaPair(match[1], match[2]);
+    match = raw.match(/(\d+)\s*(?:points?|分)\s*(?:of|\/|共)\s*(\d+)/i);
+    if (match) return normalizeQuotaPair(match[1], match[2]);
+    return null;
+  }
+
+  function parseQuotaCards(cardTexts) {
+    const result = { pc: null, mobile: null, daily: null };
+    const chunks = [];
+    (Array.isArray(cardTexts) ? cardTexts : []).forEach((text) => {
+      String(text || "").split(/[\n\r]+/).forEach((line) => {
+        const trimmed = line.replace(/\s+/g, " ").trim();
+        if (trimmed) chunks.push(trimmed);
+      });
+      const compact = String(text || "").replace(/\s+/g, " ").trim();
+      if (compact) chunks.push(compact);
+    });
+    chunks.forEach((chunk) => {
+      const kind = classifyQuotaKind(chunk);
+      const pair = parseQuotaFraction(chunk);
+      if (kind && pair && !result[kind]) result[kind] = pair;
+    });
+    return result;
+  }
+
+  function readQuotaSnapshot(store, now = new Date()) {
+    const raw = store && store[KEYS.quotaSnapshot];
+    if (!raw || typeof raw !== "object") return null;
+    if (raw.date !== localDateString(now)) return null;
+    return raw;
+  }
+
+  function mergeQuotaSnapshot(prev, next, now = new Date()) {
+    const date = localDateString(now);
+    const base = prev && prev.date === date ? prev : {};
+    return {
+      date,
+      pc: (next && next.pc) || base.pc || null,
+      mobile: (next && next.mobile) || base.mobile || null,
+      daily: (next && next.daily) || base.daily || null,
+      at: Date.now()
+    };
+  }
+
+  function formatPcQuotaHint(quota) {
+    if (!quota || !quota.pc || quota.pc.remaining == null) return "";
+    if (quota.pc.remaining <= 0) return "页面显示电脑搜索已满";
+    return `页面显示还剩 ${quota.pc.remaining} 次`;
+  }
+
+  function formatMobileHint(quota) {
+    if (!quota || !quota.mobile || quota.mobile.remaining == null) return "";
+    if (quota.mobile.remaining <= 0) return "移动搜索今日已满";
+    return `移动搜索还剩 ${quota.mobile.remaining} 次，请用手机 Bing 完成`;
+  }
+
+  function formatMobileQuotaLine(quota) {
+    if (!quota || !quota.mobile || quota.mobile.remaining == null) return "还没打开过 Rewards 读取配额";
+    if (quota.mobile.remaining <= 0) return "今日已满（不自动执行）";
+    return `页面显示还剩 ${quota.mobile.remaining} 次（不自动执行）`;
+  }
+
+  function formatQuotaHint(quota) {
+    return [formatPcQuotaHint(quota), formatMobileHint(quota)].filter(Boolean).join("。");
+  }
+
+  function parseQuizQuestionTotal(text, nodeCount) {
+    const raw = String(text || "");
+    let match = raw.match(/(?:question|问题|第)\s*(\d+)\s*(?:of|\/|／|共)\s*(\d+)/i);
+    if (match) return Math.max(1, Number(match[2]) || 0);
+    match = raw.match(/(\d+)\s*\/\s*(\d+)\s*(?:题|questions?)/i);
+    if (match) return Math.max(1, Number(match[2]) || 0);
+    const count = Number(nodeCount) || 0;
+    if (count >= 2 && count <= 15) return count;
+    return 0;
+  }
+
+  function formatQuizNextStep(kind, questionTotal, name) {
+    const label = name ? `${name}。` : "";
+    if (kind === "vote") return `${label}这是投票。请自己选完，然后点「我点完了」或「跳过这张」。`;
+    if (questionTotal > 0) return `${label}这是测验，大约 ${questionTotal} 题。请自己选完，然后点「我点完了」或「跳过这张」。`;
+    return `${label}这是测验。请自己选完，然后点「我点完了」或「跳过这张」。`;
+  }
+
   function taskStatusLabel(card) {
     if (!card) return "识别失败";
     if (card.status === TASK_STATUS.DONE) return "已完成";
@@ -819,8 +942,12 @@ const BingAssistant = (() => {
     };
   }
 
-  function formatDailyProgress(summary, dailyEnabled, dailyDone) {
+  function formatDailyProgress(summary, dailyEnabled, dailyDone, dailyQuota) {
     if (!dailyEnabled) return "未开启（安全模式）";
+    if ((!summary || summary.total === 0) && dailyQuota && dailyQuota.remaining != null) {
+      if (dailyQuota.remaining <= 0 || dailyDone) return "已完成";
+      return `还剩 ${dailyQuota.remaining} 个活动`;
+    }
     if (!summary || summary.total === 0) return dailyDone ? "已完成" : "待识别";
     const autoTotal = summary.autoTotal || 0;
     const autoDone = summary.autoDone || 0;
@@ -1136,6 +1263,7 @@ const BingAssistant = (() => {
     else state = "ready";
 
     const elapsedMs = running && startedAt > 0 ? Math.max(0, now.getTime() - startedAt) : (summary?.durationMs || 0);
+    const quota = readQuotaSnapshot(store, now);
 
     return {
       state,
@@ -1159,7 +1287,12 @@ const BingAssistant = (() => {
       dailyEnabled,
       dailyDone,
       dailySummary,
-      dailyProgress: formatDailyProgress(dailySummary, dailyEnabled, dailyDone),
+      quota,
+      quotaHint: formatQuotaHint(quota),
+      pcQuotaHint: formatPcQuotaHint(quota),
+      mobileHint: formatMobileHint(quota),
+      mobileQuotaLine: formatMobileQuotaLine(quota),
+      dailyProgress: formatDailyProgress(dailySummary, dailyEnabled, dailyDone, quota && quota.daily),
       dailyResult: formatDailyResult(dailySummary, dailyEnabled),
       taskCards: taskList.cards,
       waitingTask,
@@ -1261,6 +1394,7 @@ const BingAssistant = (() => {
     TASK_STATUS,
     TASK_KIND,
     TASK_SELECTORS,
+    QUOTA_SELECTORS,
     KEYS,
     SHORT_KEYWORD_POOL,
     LONG_KEYWORD_POOL,
@@ -1331,6 +1465,15 @@ const BingAssistant = (() => {
     importSettings,
     isRewardsDashboardPath,
     isQuizOrVotePage,
+    parseQuotaCards,
+    readQuotaSnapshot,
+    mergeQuotaSnapshot,
+    formatPcQuotaHint,
+    formatMobileHint,
+    formatMobileQuotaLine,
+    formatQuotaHint,
+    parseQuizQuestionTotal,
+    formatQuizNextStep,
     readTaskList,
     buildViewModel,
     suggestedTimeLabel
