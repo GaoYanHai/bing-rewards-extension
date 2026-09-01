@@ -1,3 +1,4 @@
+
 :root {
   --bg: #ffffff;
   --fg: #201f1e;
@@ -30,16 +31,39 @@
 html, body {
   margin: 0;
   width: 360px;
+  max-height: 560px;
+  overflow: hidden;
   background: var(--bg);
   color: var(--fg);
   font: 13px/1.45 "Segoe UI", "Microsoft YaHei", sans-serif;
 }
+#app {
+  display: flex;
+  flex-direction: column;
+  max-height: 560px;
+}
 .view { padding: 16px; }
+.view-main {
+  display: flex;
+  flex-direction: column;
+  max-height: 560px;
+  padding: 0;
+}
+.popup-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 8px;
+}
+.view-help {
+  max-height: 560px;
+  overflow-y: auto;
+}
 .brand {
   display: flex;
   gap: 10px;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 .brand img { width: 32px; height: 32px; }
 .brand h1 { margin: 0; font-size: 16px; font-weight: 600; }
@@ -62,31 +86,40 @@ html, body {
   font-size: 12px;
 }
 .state-line {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-size: 14px;
   font-weight: 600;
 }
 .stats {
   display: grid;
-  gap: 8px;
-  margin-bottom: 10px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
 }
 .stat {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   background: var(--card);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 8px;
+  min-width: 0;
 }
-.stat span { color: var(--muted); }
-.stat strong { font-weight: 600; text-align: right; }
+.stat span { color: var(--muted); font-size: 11px; }
+.stat strong {
+  font-weight: 600;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.3;
+  word-break: break-word;
+}
 .progress {
-  height: 10px;
+  height: 6px;
   background: var(--card);
   border-radius: 999px;
   overflow: hidden;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 .progress i {
   display: block;
@@ -110,7 +143,7 @@ html, body {
 .primary.stop { background: var(--danger); }
 .primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .hint {
-  min-height: 18px;
+  min-height: 16px;
   margin: 8px 0 0;
   color: var(--muted);
   font-size: 12px;
@@ -126,9 +159,12 @@ html, body {
 footer {
   display: flex;
   justify-content: space-between;
-  margin-top: 12px;
-  padding-top: 10px;
+  align-items: center;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 10px 16px 12px;
   border-top: 1px solid var(--line);
+  background: var(--bg);
 }
 .link {
   border: 0;
@@ -138,50 +174,52 @@ footer {
   font-size: 12px;
   padding: 0;
 }
-
 .log-box {
-  max-height: 84px;
+  max-height: 54px;
   overflow: auto;
   margin-top: 8px;
-  padding: 8px 10px;
+  padding: 6px 8px;
   background: var(--card);
   border-radius: 8px;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.4;
 }
 .log-box div + div { margin-top: 2px; }
-
 .whats-new {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   background: var(--card);
   border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
 }
-.whats-new p { margin: 0 0 6px; font-weight: 600; }
-.whats-new ul { margin: 0 0 6px; padding-left: 18px; color: var(--muted); font-size: 12px; }
+.whats-new-actions { display: flex; gap: 10px; flex-shrink: 0; }
 .whats-new[hidden] { display: none; }
 .week {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
-  margin: 0 0 8px;
+  gap: 4px;
+  margin: 0 0 6px;
 }
 .week[hidden] { display: none; }
 .week-cell {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 6px 0 8px;
+  gap: 3px;
+  padding: 4px 0 6px;
   border-radius: 8px;
   background: var(--card);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 .week-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #c8c6c4;
 }
@@ -194,8 +232,12 @@ footer {
 }
 .week-cell.today .week-dot { background: var(--accent); }
 .streak-line {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   color: var(--muted);
   font-size: 12px;
 }
 .streak-line[hidden] { display: none; }
+.view-help ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
+.view-help .card p { font-weight: 600; }
+.view-help .card .fineprint,
+.view-help .card p.fineprint { font-weight: 400; }
