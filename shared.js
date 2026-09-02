@@ -18,7 +18,7 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "2.4.0";
+  const PRODUCT_VERSION = "2.5.0";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -56,7 +56,8 @@ const BingAssistant = (() => {
 
   const PAUSE_REASONS = {
     USER: "user",
-    BUSY: "busy"
+    BUSY: "busy",
+    MOBILE_TAB: "mobile_tab"
   };
 
   const FAIL_CODES = {
@@ -65,8 +66,12 @@ const BingAssistant = (() => {
     RISK: "risk",
     PAGE_CHANGED: "page_changed",
     NETWORK: "network",
-    STOPPED: "stopped"
+    STOPPED: "stopped",
+    MOBILE_NO_GAIN: "mobile_no_gain",
+    MOBILE_POINTS: "mobile_points",
+    MOBILE_HEADER: "mobile_header"
   };
+  const QUIZ_ASSIST_MAX_HITS = 6;
 
   const TASK_STATUS = {
     AUTO: "auto",
@@ -498,9 +503,16 @@ const BingAssistant = (() => {
     };
   }
 
+  function isMobileFailCode(code) {
+    return code === FAIL_CODES.MOBILE_NO_GAIN || code === FAIL_CODES.MOBILE_POINTS || code === FAIL_CODES.MOBILE_HEADER;
+  }
+
   function continueHint(model) {
     if (!model) return "点继续会接着今天的进度，不会从头搜。";
     if (model.failReasonCode === FAIL_CODES.LOGIN) return model.failMessage || "请重新登录后再继续。";
+    if (isMobileFailCode(model.failReasonCode)) {
+      return model.failMessage || "可以用手机 Bing 做完，或点「我已用手机做完」。";
+    }
     if (model.count >= model.limit && model.mobilePending) {
       return "电脑搜索已满，继续会去做移动搜索。";
     }
@@ -516,11 +528,11 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "2.4 可做移动搜索、测验作答和 30 天记录",
+      title: "2.5 失败会停下来，并告诉你下一步",
       points: [
-        "危险设置打开后，电脑搜索做完可继续用手机样式做移动搜索",
-        "测验和投票可尝试自动作答；失败仍会停下来让你自己点",
-        "选项页能看近 30 天完成情况和积分变化"
+        "移动搜索加不到分、标签页被关掉或没法改成手机样式时，会停并说人话",
+        "测验自动作答同一题点几次仍在，会退回「我点完了 / 跳过」",
+        "新用户的 30 天图是空的，不会看起来像已经失败一个月"
       ]
     };
   }
@@ -559,6 +571,7 @@ const BingAssistant = (() => {
 
   function pauseStatusText(reason) {
     if (reason === PAUSE_REASONS.BUSY) return "你正在用电脑，已暂时停下";
+    if (reason === PAUSE_REASONS.MOBILE_TAB) return "移动搜索页被关掉了";
     return "已暂停";
   }
 
@@ -730,6 +743,27 @@ const BingAssistant = (() => {
         short: "连续没有加分",
         next: "今天可能已经满额，明天再试",
         message: `连续 ${limit} 次搜索没有加分，今天可能已经满额，或账号被限制。已停止。`
+      };
+    }
+    if (code === FAIL_CODES.MOBILE_NO_GAIN) {
+      return {
+        short: "这次移动搜索没有加分",
+        next: "可以用手机 Bing 做完，或点「我已用手机做完」",
+        message: "这次移动搜索没有加分，已停止。可以用手机 Bing 做完，或点「我已用手机做完」。"
+      };
+    }
+    if (code === FAIL_CODES.MOBILE_POINTS) {
+      return {
+        short: "读不到这次移动搜索的积分",
+        next: "可以用手机 Bing 做完，或点「我已用手机做完」",
+        message: "这次移动搜索读不到积分，已停止。可以用手机 Bing 做完，或点「我已用手机做完」。"
+      };
+    }
+    if (code === FAIL_CODES.MOBILE_HEADER) {
+      return {
+        short: "没法做移动搜索",
+        next: "请用手机 Bing 完成，或点「我已用手机做完」",
+        message: "没法用手机样式做这次移动搜索，已停止。请用手机 Bing 完成，或点「我已用手机做完」。"
       };
     }
     if (code === FAIL_CODES.RISK) {
@@ -1067,11 +1101,15 @@ const BingAssistant = (() => {
     const pointsValues = days.map((item) => Number.isFinite(item.points) ? item.points : null);
     const hasPoints = pointsValues.filter((item) => item != null).length >= 2;
     const maxGained = Math.max(1, ...gained);
+    const todayStr = localDateString(now);
+    const todayGain = days.find((item) => item.date === todayStr);
+    const hasTodayGain = !!(todayGain && Number.isFinite(todayGain.pointsGained) && todayGain.pointsGained > 0);
     return {
       days,
       completeDays,
       hasPoints,
-      summary: `近 30 天完成了 ${completeDays} 天`,
+      hasTodayGain,
+      summary: completeDays > 0 ? `近 30 天完成了 ${completeDays} 天` : "还没有 30 天记录",
       bars: days.map((item, index) => ({
         date: item.date,
         day: item.day,
@@ -1094,7 +1132,12 @@ const BingAssistant = (() => {
     return 0;
   }
 
-  function formatQuizNextStep(kind, questionTotal, name) {
+  function formatQuizAssistFallback() {
+    return "这张需要你自己点。选完后点「我点完了」，或跳过这张";
+  }
+
+  function formatQuizNextStep(kind, questionTotal, name, extra = {}) {
+    if (extra && extra.gaveUp) return formatQuizAssistFallback();
     const label = name ? `${name}。` : "";
     if (kind === "vote") return `${label}这是投票。请自己选完，然后点「我点完了」或「跳过这张」。`;
     if (questionTotal > 0) return `${label}这是测验，大约 ${questionTotal} 题。请自己选完，然后点「我点完了」或「跳过这张」。`;
@@ -1581,6 +1624,7 @@ const BingAssistant = (() => {
     DEFAULT_INTERVAL_MIN,
     DEFAULT_INTERVAL_MAX,
     PRODUCT_VERSION,
+    QUIZ_ASSIST_MAX_HITS,
     DAY_RECORD_KEEP_DAYS,
     DAY_RECORD_SHOW_DAYS,
     DAY_CHART_DAYS,
@@ -1651,6 +1695,7 @@ const BingAssistant = (() => {
     parseKeywordText,
     buildKeywordPlan,
     failCopy,
+    isMobileFailCode,
     isDangerEnabled,
     allowsHighRiskTasks,
     allowsQuizAssist,
@@ -1692,6 +1737,7 @@ const BingAssistant = (() => {
     formatQuotaHint,
     parseQuizQuestionTotal,
     formatQuizNextStep,
+    formatQuizAssistFallback,
     readTaskList,
     buildViewModel,
     suggestedTimeLabel

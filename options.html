@@ -86,7 +86,7 @@
 
     <section>
       <h2>近 30 天</h2>
-      <p id="chart-summary" class="help">还没有足够的记录</p>
+      <p id="chart-summary" class="help">还没有 30 天记录</p>
       <div id="month-status" class="month-grid"></div>
       <div id="month-chart" class="month-bars" hidden></div>
     </section>
@@ -207,12 +207,12 @@
           <span>自动点开并作答测验</span>
           <input type="checkbox" id="quiz-assist">
         </label>
-        <p class="help">打开后会自动点开测验和投票，并尝试作答。失败仍会停下来让你自己点。需把今日目标设成“尽量全做”。</p>
+        <p class="help">打开后会自动点开测验和投票，并尝试作答。同一题点几次还在，会停下来让你自己点。不保证能做完。需把今日目标设成“尽量全做”。</p>
         <label class="row">
           <span>执行移动搜索</span>
           <input type="checkbox" id="mobile-enabled">
         </label>
-        <p class="help">打开后，电脑搜索做完会另开一个标签页，用手机样式继续搜。可能增加账号风险，也容易被页面识破。</p>
+        <p class="help">打开后，电脑搜索做完会另开一个标签页，用手机样式继续搜。加不到分、标签页被关掉或没法改成手机样式时会停下来。可能增加账号风险，也容易被页面识破。</p>
         <label class="row">
           <span>移动搜索次数</span>
           <input type="number" id="mobile-limit" min="0" max="80" step="1">

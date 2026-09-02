@@ -72,14 +72,14 @@ function renderMonthChart(model) {
   const summary = document.getElementById("chart-summary");
   const grid = document.getElementById("month-status");
   const bars = document.getElementById("month-chart");
-  if (summary) summary.textContent = chart.summary || "还没有足够的记录";
+  if (summary) summary.textContent = chart.summary || "还没有 30 天记录";
   if (grid) {
     grid.innerHTML = (chart.days || []).map((cell) => {
       return `<div class="month-cell ${escapeHtml(cell.status)}" title="${escapeHtml(cell.title)}"><span>${escapeHtml(String(cell.day))}</span></div>`;
     }).join("");
   }
   if (bars) {
-    const hasGain = (chart.bars || []).some((item) => Number(item.value) > 0);
+    const hasGain = chart.hasTodayGain === true || (chart.bars || []).some((item) => item.date === A.localDateString() && Number(item.value) > 0);
     bars.hidden = !hasGain;
     if (hasGain) {
       bars.innerHTML = chart.bars.map((item) => {
