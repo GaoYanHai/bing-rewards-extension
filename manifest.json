@@ -1,13 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Bing 积分助手",
-  "version": "2.2.0",
+  "version": "2.4.0",
+  "homepage_url": "https://github.com/GaoYanHai/bing-rewards-extension",
   "description": "帮你在浏览器开着的时候完成今天的 Bing 搜索，并随时看清进度。",
   "permissions": [
     "alarms",
     "storage",
     "tabs",
-    "notifications"
+    "notifications",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "https://*.bing.com/*"

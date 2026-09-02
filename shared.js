@@ -2,7 +2,11 @@ const BingAssistant = (() => {
   const PRODUCT_NAME_ZH = "Bing 积分助手";
   const PRODUCT_NAME_EN = "Bing Rewards Assistant";
   const SEARCH_URL = "https://www.bing.com/search?q=%E5%A4%A9%E6%B0%94%E9%A2%84%E6%8A%A5";
+  const MOBILE_SEARCH_FLAG = "rebn";
   const REWARDS_URL = "https://rewards.bing.com/";
+  const MOBILE_UA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
+  const MOBILE_SEC_CH_UA = '"Chromium";v="124", "Not.A/Brand";v="24", "Google Chrome";v="124"';
+  const MOBILE_UA_RULE_ID = 24031;
   const ALARM_NAME = "rebang-daily-auto-start";
   const DEFAULT_SEARCH_LIMIT = 30;
   const DEFAULT_NO_GAIN_LIMIT = 10;
@@ -14,9 +18,10 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "2.2.0";
-  const DAY_RECORD_KEEP_DAYS = 14;
+  const PRODUCT_VERSION = "2.4.0";
+  const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
+  const DAY_CHART_DAYS = 30;
   const WEEKEND_GOAL_SAME = "same";
   const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
   const WORD_PACK_SHORT = "日常短词";
@@ -94,9 +99,10 @@ const BingAssistant = (() => {
   };
 
   const QUOTA_SELECTORS = {
-    cards: "mee-card, mee-rewards-daily-set-item-content, .c-card-content, .rewards-card, mee-rewards-point-breakdown, .pointsBreakdown",
-    breakdown: "#pointsBreakdown, .pointsBreakdown, mee-rewards-points-breakdown, .points-breakdown, mee-rewards-user-status-banner",
+    cards: "mee-card, mee-rewards-daily-set-item-content, .c-card-content, .rewards-card, mee-rewards-point-breakdown, .pointsBreakdown, .pointsBreakdownCard, [class*='pointsBreakdown']",
+    breakdown: "#pointsBreakdown, .pointsBreakdown, mee-rewards-points-breakdown, .points-breakdown, mee-rewards-user-status-banner, [class*='points-breakdown']",
     dailySection: "mee-rewards-daily-set-section, #daily-sets, .daily-set-section, [id*='dailySet'], [id*='daily-set']",
+    labeled: "[aria-label*='search' i], [aria-label*='Search'], [aria-label*='搜索'], [aria-label*='Daily'], [aria-label*='每日']",
     quizCount: ".rqQ, .rqQuestion, .wk_Circle, .TriviaOverlayData li, [aria-label*='Question']"
   };
 
@@ -168,7 +174,11 @@ const BingAssistant = (() => {
     missedReminded: "Rebang_MissedReminded",
     catchUpDismissed: "Rebang_CatchUpDismissed",
     whatsNewSeen: "Rebang_WhatsNewSeen",
-    quotaSnapshot: "Rebang_QuotaSnapshot"
+    quotaSnapshot: "Rebang_QuotaSnapshot",
+    mobileDoneDate: "Rebang_MobileDoneDate",
+    searchPhase: "Rebang_SearchPhase",
+    mobileSearchTabId: "Rebang_MobileSearchTabId",
+    pointsHistory: "Rebang_PointsHistory"
   };
 
   const SHORT_KEYWORD_POOL = [
@@ -468,15 +478,21 @@ const BingAssistant = (() => {
     let status = "incomplete";
     if (reason === "complete") status = "complete";
     else if (reason === "failed") status = "failed";
-    const hasProgress = count > 0 || dailyDone || (dailySummary && dailySummary.done > 0);
+    const mobileCount = extra.mobileCount != null ? Number(extra.mobileCount) : readNumber(store, dailyMobileCountKey(now), 0);
+    const points = extra.points != null ? extra.points : readablePoints(store[KEYS.pointsBalance]);
+    const pointsGained = extra.pointsGained != null ? extra.pointsGained : pointsGainedFrom(store);
+    const hasProgress = count > 0 || mobileCount > 0 || dailyDone || (dailySummary && dailySummary.done > 0);
     if (reason !== "complete" && reason !== "failed" && !hasProgress) return null;
     return {
       date: localDateString(now),
       status,
       count,
       limit,
+      mobileCount,
       dailyEnabled,
       dailyDone,
+      points,
+      pointsGained,
       reasonCode,
       at: extra.at || Date.now()
     };
@@ -485,6 +501,9 @@ const BingAssistant = (() => {
   function continueHint(model) {
     if (!model) return "点继续会接着今天的进度，不会从头搜。";
     if (model.failReasonCode === FAIL_CODES.LOGIN) return model.failMessage || "请重新登录后再继续。";
+    if (model.count >= model.limit && model.mobilePending) {
+      return "电脑搜索已满，继续会去做移动搜索。";
+    }
     if (model.count >= model.limit && model.dailyEnabled && !model.dailyDone) {
       return "电脑搜索已满，继续会去处理每日活动。";
     }
@@ -497,11 +516,11 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "2.2 能看见今天还剩多少",
+      title: "2.4 可做移动搜索、测验作答和 30 天记录",
       points: [
-        "打开过 Rewards 后，会尽量显示页面上的剩余次数",
-        "移动搜索只提醒，不会自动做",
-        "测验页会告诉你选完后点「我点完了」"
+        "危险设置打开后，电脑搜索做完可继续用手机样式做移动搜索",
+        "测验和投票可尝试自动作答；失败仍会停下来让你自己点",
+        "选项页能看近 30 天完成情况和积分变化"
       ]
     };
   }
@@ -799,19 +818,21 @@ const BingAssistant = (() => {
 
   function classifyQuotaKind(text) {
     const t = String(text || "").toLowerCase();
-    if (/mobile search|移动(设备)?搜索|手机搜索|via mobile|bing mobile/.test(t)) return "mobile";
-    if (/pc search|desktop search|computer search|电脑搜索|电脑上搜索/.test(t)) return "pc";
-    if (/search on bing/.test(t) && !/mobile|手机|移动/.test(t)) return "pc";
-    if (/daily set|每日任务|今日任务|daily check/.test(t)) return "daily";
+    if (/microsoft edge|edge bonus|edge 奖励|通过\s*microsoft\s*edge|edge 上搜索/.test(t) && !/pc search|电脑/.test(t)) return "edge";
+    if (/mobile search|移动(设备)?搜索|手机搜索|via mobile|bing mobile|search on mobile|在移动设备上搜索|在手机上搜索|移动端搜索/.test(t)) return "mobile";
+    if (/pc search|desktop search|computer search|电脑搜索|电脑上搜索|在电脑上搜索|search on (the )?pc/.test(t)) return "pc";
+    if (/search on bing/.test(t) && !/mobile|手机|移动|edge/.test(t)) return "pc";
+    if (/daily set|每日任务|今日任务|daily check|每日活动|daily activities/.test(t)) return "daily";
     return "";
   }
 
-  function normalizeQuotaPair(current, total) {
+  function normalizeQuotaPair(current, total, kind) {
     const cur = Number(current);
     const tot = Number(total);
     if (!Number.isFinite(cur) || !Number.isFinite(tot) || tot <= 0) return null;
     if (cur < 0 || cur > tot * 2) return null;
-    if (tot >= 45 && tot <= 180 && tot % 3 === 0 && cur % 3 === 0) {
+    const canSplit = (!kind || kind === "pc" || kind === "mobile") && tot >= 45 && tot <= 180 && tot % 3 === 0 && cur % 3 === 0;
+    if (canSplit) {
       return {
         current: cur / 3,
         total: tot / 3,
@@ -825,19 +846,18 @@ const BingAssistant = (() => {
     };
   }
 
-  function parseQuotaFraction(text) {
+  function parseQuotaFraction(text, kind) {
     const raw = String(text || "").replace(/,/g, "");
-    let match = raw.match(/(\d+)\s*(?:\/|of|／)\s*(\d+)/i);
-    if (match) return normalizeQuotaPair(match[1], match[2]);
-    match = raw.match(/(\d+)\s*(?:points?|分)\s*(?:of|\/|共)\s*(\d+)/i);
-    if (match) return normalizeQuotaPair(match[1], match[2]);
+    let match = raw.match(/(\d+)\s*(?:\/|of|／|out of)\s*(\d+)/i);
+    if (match) return normalizeQuotaPair(match[1], match[2], kind);
+    match = raw.match(/(\d+)\s*(?:points?|分)\s*(?:of|\/|共|out of)\s*(\d+)/i);
+    if (match) return normalizeQuotaPair(match[1], match[2], kind);
     return null;
   }
 
-  function parseQuotaCards(cardTexts) {
-    const result = { pc: null, mobile: null, daily: null };
+  function collectQuotaChunks(cardTexts) {
     const chunks = [];
-    (Array.isArray(cardTexts) ? cardTexts : []).forEach((text) => {
+    (Array.isArray(cardTexts) ? cardTexts : [cardTexts]).forEach((text) => {
       String(text || "").split(/[\n\r]+/).forEach((line) => {
         const trimmed = line.replace(/\s+/g, " ").trim();
         if (trimmed) chunks.push(trimmed);
@@ -845,10 +865,36 @@ const BingAssistant = (() => {
       const compact = String(text || "").replace(/\s+/g, " ").trim();
       if (compact) chunks.push(compact);
     });
+    return chunks;
+  }
+
+  function parseQuotaCards(cardTexts) {
+    const result = { pc: null, mobile: null, daily: null, edge: null };
+    const chunks = collectQuotaChunks(cardTexts);
+    const assign = (kind, pair) => {
+      if (!kind || !pair || result[kind]) return;
+      result[kind] = pair;
+    };
     chunks.forEach((chunk) => {
       const kind = classifyQuotaKind(chunk);
-      const pair = parseQuotaFraction(chunk);
-      if (kind && pair && !result[kind]) result[kind] = pair;
+      assign(kind, parseQuotaFraction(chunk, kind));
+    });
+    for (let i = 0; i < chunks.length; i++) {
+      const kind = classifyQuotaKind(chunks[i]);
+      if (!kind || result[kind]) continue;
+      assign(kind, parseQuotaFraction(chunks[i + 1] || "", kind) || parseQuotaFraction(chunks[i + 2] || "", kind));
+    }
+    const blob = chunks.join(" \n ");
+    const labeled = [
+      ["mobile", /(?:mobile search|移动(?:设备)?搜索|手机搜索|在移动设备上搜索|在手机上搜索)[^\d]{0,48}(\d+)\s*(?:\/|of|／|out of)\s*(\d+)/i],
+      ["pc", /(?:pc search|desktop search|computer search|电脑搜索|在电脑上搜索|电脑上搜索)[^\d]{0,48}(\d+)\s*(?:\/|of|／|out of)\s*(\d+)/i],
+      ["daily", /(?:daily set|每日任务|今日任务|每日活动|daily activities)[^\d]{0,48}(\d+)\s*(?:\/|of|／|out of)\s*(\d+)/i],
+      ["edge", /(?:microsoft edge|edge bonus|edge 奖励|通过\s*microsoft\s*edge)[^\d]{0,48}(\d+)\s*(?:\/|of|／|out of)\s*(\d+)/i]
+    ];
+    labeled.forEach(([kind, re]) => {
+      if (result[kind]) return;
+      const match = re.exec(blob);
+      if (match) assign(kind, normalizeQuotaPair(match[1], match[2], kind));
     });
     return result;
   }
@@ -868,8 +914,34 @@ const BingAssistant = (() => {
       pc: (next && next.pc) || base.pc || null,
       mobile: (next && next.mobile) || base.mobile || null,
       daily: (next && next.daily) || base.daily || null,
+      edge: (next && next.edge) || base.edge || null,
       at: Date.now()
     };
+  }
+
+  function isMobileDoneToday(store, now = new Date()) {
+    return String((store && store[KEYS.mobileDoneDate]) || "") === localDateString(now);
+  }
+
+  function allowsMobileSearch(store) {
+    return isDangerEnabled(store) && store[KEYS.mobileSearchEnabled] === true;
+  }
+
+  function effectiveMobileLimit(store, now = new Date()) {
+    const quota = readQuotaSnapshot(store, now);
+    const done = readNumber(store, dailyMobileCountKey(now), 0);
+    if (quota && quota.mobile && Number.isFinite(Number(quota.mobile.remaining))) {
+      return Math.max(done, done + Math.max(0, Math.round(Number(quota.mobile.remaining))));
+    }
+    return Math.max(0, readNumber(store, KEYS.mobileSearchLimit, DEFAULT_MOBILE_LIMIT));
+  }
+
+  function shouldRunMobileSearch(store, now = new Date()) {
+    if (!allowsMobileSearch(store)) return false;
+    if (isMobileDoneToday(store, now)) return false;
+    const limit = effectiveMobileLimit(store, now);
+    if (limit <= 0) return false;
+    return readNumber(store, dailyMobileCountKey(now), 0) < limit;
   }
 
   function formatPcQuotaHint(quota) {
@@ -878,20 +950,137 @@ const BingAssistant = (() => {
     return `页面显示还剩 ${quota.pc.remaining} 次`;
   }
 
-  function formatMobileHint(quota) {
+  function formatMobileHint(quota, store, now = new Date()) {
+    if (isMobileDoneToday(store, now)) {
+      if (!quota || !quota.mobile) return "你已标记今天用手机做完。这里只是你自己的标记";
+      return "你已标记今天用手机做完";
+    }
     if (!quota || !quota.mobile || quota.mobile.remaining == null) return "";
     if (quota.mobile.remaining <= 0) return "移动搜索今日已满";
+    if (allowsMobileSearch(store)) return `移动搜索还剩 ${quota.mobile.remaining} 次`;
     return `移动搜索还剩 ${quota.mobile.remaining} 次，请用手机 Bing 完成`;
   }
 
-  function formatMobileQuotaLine(quota) {
+  function formatMobileQuotaLine(quota, store, now = new Date()) {
+    if (isMobileDoneToday(store, now)) {
+      if (!quota || !quota.mobile) return "你已标记今天用手机做完（只是你自己的标记）";
+      return "你已标记今天用手机做完";
+    }
+    if (allowsMobileSearch(store) && shouldRunMobileSearch(store, now)) {
+      const remain = Math.max(0, effectiveMobileLimit(store, now) - readNumber(store, dailyMobileCountKey(now), 0));
+      return `将用手机样式再搜 ${remain} 次`;
+    }
     if (!quota || !quota.mobile || quota.mobile.remaining == null) return "还没打开过 Rewards 读取配额";
     if (quota.mobile.remaining <= 0) return "今日已满（不自动执行）";
     return `页面显示还剩 ${quota.mobile.remaining} 次（不自动执行）`;
   }
 
-  function formatQuotaHint(quota) {
-    return [formatPcQuotaHint(quota), formatMobileHint(quota)].filter(Boolean).join("。");
+  function formatEdgeHint(quota) {
+    if (!quota || !quota.edge || quota.edge.remaining == null || quota.edge.remaining <= 0) return "";
+    return `页面还显示 Edge 奖励剩余 ${quota.edge.remaining}`;
+  }
+
+  function formatQuotaHint(quota, store, now = new Date()) {
+    return [formatPcQuotaHint(quota), formatMobileHint(quota, store, now), formatEdgeHint(quota)].filter(Boolean).join("。");
+  }
+
+  function buildSearchUrl(keyword, extra = {}) {
+    const params = new URLSearchParams();
+    params.set("q", keyword || "天气预报");
+    params.set("form", extra.mobile ? "QBLH" : "QBRE");
+    if (extra.mobile) params.set(MOBILE_SEARCH_FLAG, "m");
+    return `https://www.bing.com/search?${params.toString()}`;
+  }
+
+  function isMobileSearchUrl(url) {
+    try {
+      return new URL(url, "https://www.bing.com").searchParams.get(MOBILE_SEARCH_FLAG) === "m";
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function weekCompleteDays(store, now = new Date()) {
+    const records = dayRecordMap(store);
+    let count = 0;
+    for (let offset = 0; offset < DAY_RECORD_SHOW_DAYS; offset++) {
+      const record = records.get(localDateString(shiftLocalDate(now, -offset)));
+      if (record && record.status === "complete") count += 1;
+    }
+    return count;
+  }
+
+  function weekCompleteLine(store, now = new Date()) {
+    return `近 7 天完成了 ${weekCompleteDays(store, now)} 天`;
+  }
+
+  function readPointsHistory(store) {
+    const raw = store && store[KEYS.pointsHistory];
+    return Array.isArray(raw) ? raw.filter((item) => item && item.date && Number.isFinite(Number(item.points))) : [];
+  }
+
+  function upsertPointsHistory(history, points, now = new Date()) {
+    const value = Number(points);
+    if (!Number.isFinite(value)) return Array.isArray(history) ? history : [];
+    const date = localDateString(now);
+    const next = (Array.isArray(history) ? history : []).filter((item) => item && item.date && item.date !== date);
+    next.push({ date, points: value });
+    const cutoff = localDateString(shiftLocalDate(now, -(DAY_RECORD_KEEP_DAYS - 1)));
+    return next.filter((item) => item.date >= cutoff).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  function cellStatusForDate(store, dateStr, now = new Date()) {
+    const today = localDateString(now);
+    const record = dayRecordMap(store).get(dateStr);
+    if (dateStr === today) return "today";
+    if (record && record.status === "complete") return "complete";
+    if (record && record.status === "failed") return "failed";
+    if (record) return "incomplete";
+    return "empty";
+  }
+
+  function buildMonthChartModel(store, now = new Date()) {
+    const records = dayRecordMap(store);
+    const historyMap = new Map(readPointsHistory(store).map((item) => [item.date, item]));
+    const days = [];
+    for (let offset = DAY_CHART_DAYS - 1; offset >= 0; offset--) {
+      const date = shiftLocalDate(now, -offset);
+      const dateStr = localDateString(date);
+      const record = records.get(dateStr);
+      const snap = historyMap.get(dateStr);
+      days.push({
+        date: dateStr,
+        day: date.getDate(),
+        weekday: weekdayShort(date).replace("周", ""),
+        status: cellStatusForDate(store, dateStr, now),
+        title: `${date.getMonth() + 1}月${date.getDate()}日 ${recordStatusLabel(cellStatusForDate(store, dateStr, now))}`,
+        points: snap ? Number(snap.points) : (record && record.points != null ? Number(record.points) : null),
+        pointsGained: record && record.pointsGained != null ? Number(record.pointsGained) : null
+      });
+    }
+    const completeDays = days.filter((item) => {
+      if (item.status === "complete") return true;
+      const record = records.get(item.date);
+      return record && record.status === "complete";
+    }).length;
+    const gained = days.map((item) => Number.isFinite(item.pointsGained) ? item.pointsGained : 0);
+    const pointsValues = days.map((item) => Number.isFinite(item.points) ? item.points : null);
+    const hasPoints = pointsValues.filter((item) => item != null).length >= 2;
+    const maxGained = Math.max(1, ...gained);
+    return {
+      days,
+      completeDays,
+      hasPoints,
+      summary: `近 30 天完成了 ${completeDays} 天`,
+      bars: days.map((item, index) => ({
+        date: item.date,
+        day: item.day,
+        status: item.status,
+        value: gained[index],
+        percent: Math.round((gained[index] / maxGained) * 100),
+        points: pointsValues[index]
+      }))
+    };
   }
 
   function parseQuizQuestionTotal(text, nodeCount) {
@@ -992,6 +1181,7 @@ const BingAssistant = (() => {
       ? extra.dailyDone
       : (store[dailyTasksDoneKey(now)] === true || store[dailyTasksDoneKey(now)] === "true");
     const pointsGained = extra.pointsGained != null ? extra.pointsGained : pointsGainedFrom(store);
+    const mobileCount = extra.mobileCount != null ? Number(extra.mobileCount) : readNumber(store, dailyMobileCountKey(now), 0);
     const closingLine = extra.closingLine || formatClosingLine({
       dailyEnabled,
       dailyDone,
@@ -1002,6 +1192,7 @@ const BingAssistant = (() => {
       reasonCode,
       count,
       limit,
+      mobileCount,
       durationMs,
       at: extra.at || Date.now(),
       dailyEnabled,
@@ -1015,6 +1206,7 @@ const BingAssistant = (() => {
   function formatCompleteNotify(summary) {
     if (!summary) return "今天的任务已完成";
     const parts = [`今日电脑搜索 ${summary.count}/${summary.limit}`];
+    if (summary.mobileCount) parts.push(`移动搜索 ${summary.mobileCount} 次`);
     if (summary.dailyEnabled && summary.dailySummary) {
       parts.push(`每日活动完成 ${summary.dailySummary.done || 0} 张、跳过 ${summary.dailySummary.skipped || 0} 张`);
     }
@@ -1252,14 +1444,16 @@ const BingAssistant = (() => {
       ? store[KEYS.dailyKeywordPlan]
       : null;
 
+    const mobilePending = shouldRunMobileSearch(store, now);
+    const searchPhase = store[KEYS.searchPhase] || "";
     let state = "ready";
     if (!riskAccepted) state = "onboarding";
     else if (loginState === "out") state = "logged_out";
     else if (paused) state = "paused";
     else if (running) state = "running";
-    else if (productState === "failed" && (count < limit || (dailyEnabled && !dailyDone))) state = "failed";
-    else if (count >= limit && (!dailyEnabled || dailyDone || (dailySummary.total > 0 && dailySummary.autoPending === 0))) state = "complete";
-    else if (productState === "complete" && (!dailyEnabled || dailyDone)) state = "complete";
+    else if (productState === "failed" && (count < limit || mobilePending || (dailyEnabled && !dailyDone))) state = "failed";
+    else if (count >= limit && !mobilePending && (!dailyEnabled || dailyDone || (dailySummary.total > 0 && dailySummary.autoPending === 0))) state = "complete";
+    else if (productState === "complete" && !mobilePending && (!dailyEnabled || dailyDone)) state = "complete";
     else state = "ready";
 
     const elapsedMs = running && startedAt > 0 ? Math.max(0, now.getTime() - startedAt) : (summary?.durationMs || 0);
@@ -1288,10 +1482,13 @@ const BingAssistant = (() => {
       dailyDone,
       dailySummary,
       quota,
-      quotaHint: formatQuotaHint(quota),
+      quotaHint: formatQuotaHint(quota, store, now),
       pcQuotaHint: formatPcQuotaHint(quota),
-      mobileHint: formatMobileHint(quota),
-      mobileQuotaLine: formatMobileQuotaLine(quota),
+      mobileHint: formatMobileHint(quota, store, now),
+      mobileQuotaLine: formatMobileQuotaLine(quota, store, now),
+      mobilePending,
+      mobileDoneToday: isMobileDoneToday(store, now),
+      searchPhase,
       dailyProgress: formatDailyProgress(dailySummary, dailyEnabled, dailyDone, quota && quota.daily),
       dailyResult: formatDailyResult(dailySummary, dailyEnabled),
       taskCards: taskList.cards,
@@ -1331,9 +1528,12 @@ const BingAssistant = (() => {
       recentLogs: Array.isArray(store[KEYS.recentLogs]) ? store[KEYS.recentLogs] : [],
       dangerEnabled: isDangerEnabled(store),
       highRiskTasksEnabled: allowsHighRiskTasks(store),
-      mobileEnabled: isDangerEnabled(store) && store[KEYS.mobileSearchEnabled] === true,
-      mobileLimit: Math.max(0, readNumber(store, KEYS.mobileSearchLimit, DEFAULT_MOBILE_LIMIT)),
+      mobileEnabled: allowsMobileSearch(store),
+      mobileLimit: effectiveMobileLimit(store, now),
       mobileCount: readNumber(store, dailyMobileCountKey(now), 0),
+      monthChart: buildMonthChartModel(store, now),
+      weekCompleteDays: weekCompleteDays(store, now),
+      weekCompleteLine: weekCompleteLine(store, now),
       catchUpEnabled: store[KEYS.catchUpEnabled] !== false,
       catchUpAsk: store[KEYS.catchUpAsk] === true,
       missedRemindEnabled: store[KEYS.missedRemindEnabled] !== false,
@@ -1347,6 +1547,7 @@ const BingAssistant = (() => {
         limit,
         dailyEnabled,
         dailyDone,
+        mobilePending,
         failReasonCode,
         failMessage: lastError || fail.message
       }),
@@ -1363,7 +1564,11 @@ const BingAssistant = (() => {
     PRODUCT_NAME_ZH,
     PRODUCT_NAME_EN,
     SEARCH_URL,
+    MOBILE_SEARCH_FLAG,
     REWARDS_URL,
+    MOBILE_UA,
+    MOBILE_SEC_CH_UA,
+    MOBILE_UA_RULE_ID,
     ALARM_NAME,
     DEFAULT_SEARCH_LIMIT,
     DEFAULT_NO_GAIN_LIMIT,
@@ -1378,6 +1583,7 @@ const BingAssistant = (() => {
     PRODUCT_VERSION,
     DAY_RECORD_KEEP_DAYS,
     DAY_RECORD_SHOW_DAYS,
+    DAY_CHART_DAYS,
     WEEKEND_GOAL_SAME,
     WEEKDAY_NAMES,
     WORD_PACK_SHORT,
@@ -1448,6 +1654,17 @@ const BingAssistant = (() => {
     isDangerEnabled,
     allowsHighRiskTasks,
     allowsQuizAssist,
+    allowsMobileSearch,
+    isMobileDoneToday,
+    effectiveMobileLimit,
+    shouldRunMobileSearch,
+    buildSearchUrl,
+    isMobileSearchUrl,
+    weekCompleteDays,
+    weekCompleteLine,
+    readPointsHistory,
+    upsertPointsHistory,
+    buildMonthChartModel,
     classifyTask,
     taskStatusLabel,
     summarizeTasks,
@@ -1471,6 +1688,7 @@ const BingAssistant = (() => {
     formatPcQuotaHint,
     formatMobileHint,
     formatMobileQuotaLine,
+    formatEdgeHint,
     formatQuotaHint,
     parseQuizQuestionTotal,
     formatQuizNextStep,

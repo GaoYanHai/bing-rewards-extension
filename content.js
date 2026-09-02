@@ -23,7 +23,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         key === BingAssistant.KEYS.blockedKeywords ||
         key === BingAssistant.KEYS.selectedChannel ||
         key === BingAssistant.KEYS.keywordShuffle ||
-        key.indexOf("Rebang_AutoSearchCount_") === 0
+        key.indexOf("Rebang_AutoSearchCount_") === 0 ||
+        key.indexOf("Rebang_MobileSearchCount_") === 0 ||
+        key === BingAssistant.KEYS.searchPhase ||
+        key === BingAssistant.KEYS.mobileDoneDate
     );
     if (changes[BingAssistant.KEYS.dailyKeywordPlan] || changes[BingAssistant.KEYS.blockedKeywords] || changes[BingAssistant.KEYS.selectedChannel] || changes[BingAssistant.KEYS.keywordShuffle]) {
         try { sessionStorage.removeItem(getCurrentChannelKeywordsCacheKey()); } catch (error) {}
@@ -598,7 +601,6 @@ function syncTabStatus() {
         // 1. 主控死掉了 (isMasterDead) -> 抢
         // 2. 主控还活着，但是它处于闲置状态 (Status == IDLE) -> 抢
         if (masterId === "" || isMasterDead || masterStatus === "IDLE") {
-            console.log(`[Rebang] 检测到主控空闲或失效 (Status:${masterStatus}, Dead:${isMasterDead})，正在接管...`);
 
             // 抢夺主控权
             setVal(globalMasterTabKey, currentTabId);
@@ -795,6 +797,12 @@ function getSearchPagePoints() {
         if (txt && /\d/.test(txt)) return parsePointsText(txt);
     }
 
+    let $mobilePoints = $("#fly_id_rc, .points-value, [aria-label*='Rewards'], [aria-label*='积分']").first();
+    if ($mobilePoints.length > 0) {
+        const parsed = parsePointsText($mobilePoints.text() || $mobilePoints.attr("aria-label"));
+        if (parsed != null) return parsed;
+    }
+
     return null;
 }
 
@@ -949,11 +957,22 @@ function publishAssistantState() {
   if (snapshot === lastPublishedState) return;
   lastPublishedState = snapshot;
   const payload = {
-    [BingAssistant.KEYS.loginState]: login,
     [BingAssistant.KEYS.lastKeyword]: keyword,
     [BingAssistant.KEYS.lastStatusMessage]: ($("#ex-user-msg").text() || "").trim()
   };
-  if (points !== null) payload[BingAssistant.KEYS.pointsBalance] = points;
+  const onRewards = window.location.hostname === "rewards.bing.com";
+  if (points !== null) {
+    payload[BingAssistant.KEYS.pointsBalance] = points;
+    payload[BingAssistant.KEYS.loginState] = "in";
+    payload[BingAssistant.KEYS.pointsHistory] = BingAssistant.upsertPointsHistory(
+      getVal(BingAssistant.KEYS.pointsHistory, []),
+      points
+    );
+  } else if (onRewards) {
+    if (login === "in") payload[BingAssistant.KEYS.loginState] = "in";
+  } else {
+    payload[BingAssistant.KEYS.loginState] = login;
+  }
   chrome.storage.local.set(payload).catch(() => {});
 }
 
@@ -987,8 +1006,9 @@ function renderRecentLogs() {
 }
 
 function updateMiniBar() {
-  const count = Number(getVal(getAutoSearchCountKey(), 0));
-  const limit = todaySearchLimit();
+  const track = currentSearchTrack();
+  const count = Number(getVal(track.countKey, 0));
+  const limit = track.limit;
   const running = getVal(autoSearchLockKey, "off") === "on";
   const paused = isRunPaused();
   const model = BingAssistant.buildViewModel(rebangExtensionStore);
@@ -997,7 +1017,7 @@ function updateMiniBar() {
     $("#rebang-mini-progress").text("每日活动");
     $("#ext-task-summary").text(`每日活动 ${model.dailyProgress}`);
   } else {
-    $("#rebang-mini-progress").text(`电脑搜索 ${count}/${limit}`);
+    $("#rebang-mini-progress").text(`${track.label} ${count}/${limit}`);
     $("#ext-task-summary").text(`每日活动 ${model.dailyProgress}`);
   }
   $("#ext-current-count").text(count);
@@ -1029,10 +1049,11 @@ function showUserMessage(msg, logEvent) {
 }
 
 function findSearchBox() {
-    const $input = $("#sb_form_q");
+    let $input = $("#sb_form_q");
+    if ($input.length === 0) $input = $("input[name=q], input[type=search]").first();
     let $btn = $("#sb_form_go");
     if ($btn.length === 0) $btn = $("#sb_form_submit");
-    if ($btn.length === 0) $btn = $(".search_icon, .b_searchboxSubmit");
+    if ($btn.length === 0) $btn = $(".search_icon, .b_searchboxSubmit, #sb_search, input[type=submit]").first();
     return { $input, $btn };
 }
 
@@ -1060,7 +1081,7 @@ function doSearch(keyword) {
         reason: "页面改版",
         reasonCode: BingAssistant.FAIL_CODES.PAGE_CHANGED
     });
-    window.location.href = "https://www.bing.com/search?q=" + encodeURIComponent(keyword) + "&form=QBRE&sp=-1&lq=0";
+    window.location.href = BingAssistant.buildSearchUrl(keyword, { mobile: isMobileSearchMode() });
     return false;
 }
 
@@ -1163,6 +1184,7 @@ function goToRewardsPage(nowTime, currentPoints) {
     }
     setVal(globalLockKey, nowTime);
     setVal(globalMasterTabKey, currentTabId);
+    setVal(BingAssistant.KEYS.searchPhase, "daily");
     showUserMessage("电脑搜索已完成，正在打开每日活动", { action: "电脑搜索已完成，正在打开每日活动" });
     if (currentPoints !== null) setVal(jumpLastPointsKey, currentPoints);
     setVal(getDailyTaskRedirectTimeKey(), nowTime);
@@ -1182,6 +1204,39 @@ function todaySearchLimit() {
 
 function dailyTasksWanted() {
     return BingAssistant.goalEnablesDaily(currentGoal());
+}
+
+function isMobileSearchMode() {
+    if (location.hostname === "rewards.bing.com") return false;
+    if (sessionStorage.getItem("Rebang_SearchKind") === "mobile") return true;
+    try {
+        if (new URLSearchParams(location.search).get(BingAssistant.MOBILE_SEARCH_FLAG) === "m") {
+            sessionStorage.setItem("Rebang_SearchKind", "mobile");
+            return true;
+        }
+    } catch (_error) {}
+    return false;
+}
+
+function currentSearchTrack() {
+    if (isMobileSearchMode()) {
+        return {
+            kind: "mobile",
+            countKey: BingAssistant.dailyMobileCountKey(),
+            limit: BingAssistant.effectiveMobileLimit(rebangExtensionStore),
+            label: "移动搜索"
+        };
+    }
+    return {
+        kind: "pc",
+        countKey: getAutoSearchCountKey(),
+        limit: todaySearchLimit(),
+        label: "电脑搜索"
+    };
+}
+
+function currentSearchPhase() {
+    return getVal(BingAssistant.KEYS.searchPhase, "") || "pc";
 }
 
 function isQuizOrVotePage() {
@@ -1211,12 +1266,28 @@ function saveRewardsQuotasIfAny() {
     if (!isRewardsDashboard()) return;
     try {
         const texts = [];
-        $(BingAssistant.QUOTA_SELECTORS.cards).each(function() {
-            const text = ($(this).text() || "").replace(/\s+/g, " ").trim();
-            if (text) texts.push(text);
+        const seen = new Set();
+        const pushText = (value) => {
+            const text = String(value || "").replace(/\s+/g, " ").trim();
+            if (!text || text.length > 500 || seen.has(text)) return;
+            seen.add(text);
+            texts.push(text);
+        };
+        const collectNode = (node) => {
+            if (!node) return;
+            const $node = $(node);
+            pushText($node.attr("aria-label"));
+            pushText($node.attr("title"));
+            pushText($node.text());
+        };
+        $(BingAssistant.QUOTA_SELECTORS.cards).each(function() { collectNode(this); });
+        $(BingAssistant.QUOTA_SELECTORS.breakdown).each(function() {
+            collectNode(this);
+            $(this).children().each(function() { collectNode(this); });
         });
-        const breakdown = ($(BingAssistant.QUOTA_SELECTORS.breakdown).text() || "").replace(/\s+/g, " ").trim();
-        if (breakdown) texts.push(breakdown);
+        if (BingAssistant.QUOTA_SELECTORS.labeled) {
+            $(BingAssistant.QUOTA_SELECTORS.labeled).each(function() { collectNode(this); });
+        }
         const parsed = BingAssistant.parseQuotaCards(texts);
         const dailySection = $(BingAssistant.QUOTA_SELECTORS.dailySection).first();
         if (dailySection.length) {
@@ -1233,7 +1304,7 @@ function saveRewardsQuotasIfAny() {
                 };
             }
         }
-        if (!parsed.pc && !parsed.mobile && !parsed.daily) return;
+        if (!parsed.pc && !parsed.mobile && !parsed.daily && !parsed.edge) return;
         const prev = BingAssistant.readQuotaSnapshot(rebangExtensionStore);
         setVal(BingAssistant.KEYS.quotaSnapshot, BingAssistant.mergeQuotaSnapshot(prev, parsed));
     } catch (error) {}
@@ -1378,6 +1449,60 @@ function finishDailyAndReturn(msg, logEvent) {
     }, 1200);
 }
 
+function isVisibleElement(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+    const rect = el.getBoundingClientRect();
+    const style = window.getComputedStyle(el);
+    return rect.width > 8 && rect.height > 8 && style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
+}
+
+function isQuizCompleteUi() {
+    if (document.querySelector("#quizCompleteContainer, .rqcompleted, #quizComplete, .quizComplete")) return true;
+    const snippet = ((document.body && document.body.innerText) || "").slice(0, 2500);
+    return /quiz complete|you earned|测验完成|已完成测验/i.test(snippet) && !document.querySelector("[id^=rqAnswerOption]");
+}
+
+function findQuizClickTarget() {
+    const start = document.querySelector("#rqStartQuiz, #startQuiz, input#rqStartQuiz, button#rqStartQuiz");
+    if (start && isVisibleElement(start)) return start;
+    const options = Array.from(document.querySelectorAll("[id^=rqAnswerOption], .rqOption, .rq_answer, .rqQuestion .rqOption, .btOption, .bt_option"));
+    const clickable = options.filter((el) => {
+        if (!isVisibleElement(el)) return false;
+        const cls = `${el.className || ""} ${el.getAttribute("aria-label") || ""}`;
+        if (/wrong|disabled|selected|correct/i.test(cls) && /wrong|disabled/i.test(cls)) return false;
+        if (el.closest(".rqWrong, .wrongAnswer, .isWrong")) return false;
+        return true;
+    });
+    if (clickable.length) {
+        const unused = clickable.filter((el) => !/selected|isCorrect|correct/i.test(`${el.className || ""}`));
+        return (unused[0] || clickable[0]);
+    }
+    const circles = Array.from(document.querySelectorAll(".wk_Circle, .wk_circle")).filter(isVisibleElement);
+    if (circles.length) return circles.find((el) => !/selected|current|correct/i.test(`${el.className || ""}`)) || circles[0];
+    return null;
+}
+
+let quizSolveInFlight = false;
+function scheduleQuizAutoSolve(waiting) {
+    if (quizSolveInFlight) return true;
+    if (!BingAssistant.allowsQuizAssist(rebangExtensionStore)) return false;
+    if (isQuizCompleteUi()) {
+        showUserMessage("测验看起来已完成，正在返回清单");
+        setTimeout(() => returnToRewardsDashboard("测验已完成，正在返回清单"), 900);
+        return true;
+    }
+    const target = findQuizClickTarget();
+    if (!target) return false;
+    quizSolveInFlight = true;
+    showUserMessage(waiting && waiting.name ? `正在作答：${waiting.name}` : "正在自动作答测验");
+    setTimeout(() => {
+        quizSolveInFlight = false;
+        if (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) return;
+        try { target.click(); } catch (_error) {}
+    }, 800 + Math.floor(Math.random() * 900));
+    return true;
+}
+
 async function handleRewardsPage() {
     let isLocked = getVal(autoSearchLockKey, "off");
     let currentPoints = getBingPoints();
@@ -1496,6 +1621,10 @@ async function handleRewardsPage() {
                 ? `需要你点一下：${waitingNow.name}`
                 : BingAssistant.pauseStatusText(getVal(BingAssistant.KEYS.pauseReason, "")));
             setUserTaskButtons(!!(waitingNow && waitingNow.url));
+            return;
+        }
+        if (scheduleQuizAutoSolve(waitingNow)) {
+            setUserTaskButtons(true);
             return;
         }
         showUserMessage(quizPageNextStep(waitingNow && waitingNow.name));
@@ -1680,11 +1809,21 @@ async function doAutoSearch() {
   // 修改后：只要 isMaster 为 false，说明 syncTabStatus 认为主控还活着（没超过20秒），
   // 那么我就绝对不动，老老实实待机，实现"固定主控"。
   if (!isMaster) {
-      console.log(`[Rebang] Slave tab standby. Waiting for Master.`);
       return;
   }
   if (await maybeHandleBusyPause()) {
       updateMiniBar();
+      return;
+  }
+  const phase = currentSearchPhase();
+  if (phase === "mobile" && !isMobileSearchMode()) return;
+  if (phase === "daily") return;
+  if (phase === "pc" && isMobileSearchMode()) return;
+  if (document.querySelector("#rqStartQuiz, [id^=rqAnswerOption], .rqOption, .wk_Circle, .btOption, #quizCompleteContainer")) {
+      const waiting = getVal(BingAssistant.KEYS.waitingUserTask, null);
+      if (!scheduleQuizAutoSolve(waiting)) {
+          showUserMessage(quizPageNextStep(waiting && waiting.name));
+      }
       return;
   }
   // -----------------------------------
@@ -1692,6 +1831,7 @@ async function doAutoSearch() {
   // 【修复关键】：优先读取 UI 复选框的实时状态，防止存储延迟导致读取为 false
   let enableDaily = dailyTasksWanted();
   let dailyDone = getVal(getDailyTasksDoneKey(), false) === true || getVal(getDailyTasksDoneKey(), false) === "true";
+  const track = currentSearchTrack();
 
   if (!navigator.onLine) {
       stopForReason(BingAssistant.FAIL_CODES.NETWORK);
@@ -1702,7 +1842,8 @@ async function doAutoSearch() {
       stopForLogin(true);
       return;
   }
-  if ($("#sb_form_q").length === 0 && document.readyState === "complete") {
+  const searchBox = findSearchBox();
+  if (searchBox.$input.length === 0 && document.readyState === "complete") {
       searchBoxMissCount += 1;
       if (searchBoxMissCount >= 8) {
           stopForReason(BingAssistant.FAIL_CODES.PAGE_CHANGED, { where: "search" });
@@ -1727,10 +1868,21 @@ async function doAutoSearch() {
   }
   pointsMissCount = 0;
 
-  const currentSearchCountNow = Number(getVal(getAutoSearchCountKey(), 0));
-  const limitSearchCountNow = todaySearchLimit();
+  const currentSearchCountNow = Number(getVal(track.countKey, 0));
+  const limitSearchCountNow = track.limit;
   if (currentSearchCountNow >= limitSearchCountNow) {
+      if (track.kind === "mobile") {
+          setVal(BingAssistant.KEYS.mobileDoneDate, getLocalDateStr());
+          chrome.runtime.sendMessage({ type: "MOBILE_SEARCH_FINISHED" }).catch(() => {});
+          return;
+      }
+      if (BingAssistant.shouldRunMobileSearch(rebangExtensionStore)) {
+          setVal(BingAssistant.KEYS.searchPhase, "mobile");
+          chrome.runtime.sendMessage({ type: "START_MOBILE_SEARCH" }).catch(() => {});
+          return;
+      }
       if (enableDaily && !dailyDone) {
+          setVal(BingAssistant.KEYS.searchPhase, "daily");
           goToRewardsPage(nowTime, currentPoints);
           return;
       }
@@ -1751,7 +1903,7 @@ async function doAutoSearch() {
   }
 
   let lastPoints = getVal(lastPointsKey, null);
-  let currentSearchCount = Number(getVal(getAutoSearchCountKey(), 0));
+  let currentSearchCount = Number(getVal(track.countKey, 0));
   let isPointsIncreased = false;
 
   let maxNoGainLimit = Number(getVal(maxNoGainLimitKey, 10));
@@ -1762,14 +1914,12 @@ async function doAutoSearch() {
       let lastP = Number(lastPoints);
       if (currentPoints > lastP) {
           currentSearchCount++;
-          setVal(getAutoSearchCountKey(), currentSearchCount);
+          setVal(track.countKey, currentSearchCount);
           isPointsIncreased = true;
           setVal(consecutiveNoGainKey, 0);
 
           // 【修复】积分涨了，说明当前页面正常，重置"换页重试计数"
           setVal(relayRetryKey, 0);
-
-          console.log(`[Rebang] Points increased: ${lastP} -> ${currentPoints}.`);
       } else {
           consecutiveNoGain++;
           setVal(consecutiveNoGainKey, consecutiveNoGain);
@@ -1786,8 +1936,8 @@ async function doAutoSearch() {
   $("#ext-current-count").text(currentSearchCount);
 
   // 【新增】更新进度条和状态指示器
-  let limitSearchCount = todaySearchLimit();
-  let progressPercent = Math.min((currentSearchCount / limitSearchCount) * 100, 100);
+  let limitSearchCount = track.limit;
+  let progressPercent = limitSearchCount > 0 ? Math.min((currentSearchCount / limitSearchCount) * 100, 100) : 100;
   $("#search-progress-bar").css("width", progressPercent + "%");
 
   // 更新状态指示器
@@ -1797,7 +1947,18 @@ async function doAutoSearch() {
   if (currentSearchCount >= limitSearchCount) {
       setVal(lastPointsKey, null);
       setVal(globalMasterStatusKey, "IDLE");
+      if (track.kind === "mobile") {
+          setVal(BingAssistant.KEYS.mobileDoneDate, getLocalDateStr());
+          chrome.runtime.sendMessage({ type: "MOBILE_SEARCH_FINISHED" }).catch(() => {});
+          return;
+      }
+      if (BingAssistant.shouldRunMobileSearch(rebangExtensionStore)) {
+          setVal(BingAssistant.KEYS.searchPhase, "mobile");
+          chrome.runtime.sendMessage({ type: "START_MOBILE_SEARCH" }).catch(() => {});
+          return;
+      }
       if (enableDaily && !dailyDone) {
+          setVal(BingAssistant.KEYS.searchPhase, "daily");
           goToRewardsPage(Date.now(), currentPoints);
           return;
       }
@@ -1842,7 +2003,7 @@ async function doAutoSearch() {
         : (lastPoints !== null ? `这次没有加分（${consecutiveNoGain}/${maxNoGainLimit}）` : "");
     let msg = result ? `${result}。` : "";
     showUserMessage(`${msg}正在搜索：${truncateText(word, 15)}`, {
-        action: `电脑搜索 ${currentSearchCount}/${limitSearchCount}  ${word}`,
+        action: `${track.label} ${currentSearchCount}/${limitSearchCount}  ${word}`,
         result
     });
 
