@@ -51,6 +51,153 @@ async function openOrWakeRewardsTab() {
   return created.id;
 }
 
+async function clearMobileUaRules() {
+  try {
+    await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [A.MOBILE_UA_RULE_ID]
+    });
+  } catch (_error) {}
+}
+
+async function applyMobileUaRules(tabId) {
+  const rule = {
+    id: A.MOBILE_UA_RULE_ID,
+    priority: 1,
+    action: {
+      type: "modifyHeaders",
+      requestHeaders: [
+        { header: "user-agent", operation: "set", value: A.MOBILE_UA },
+        { header: "sec-ch-ua", operation: "set", value: A.MOBILE_SEC_CH_UA },
+        { header: "sec-ch-ua-mobile", operation: "set", value: "?1" },
+        { header: "sec-ch-ua-platform", operation: "set", value: "\"Android\"" },
+        { header: "sec-ch-ua-model", operation: "set", value: "\"Pixel 7\"" },
+        { header: "sec-ch-ua-full-version-list", operation: "remove" }
+      ]
+    },
+    condition: {
+      tabIds: [tabId],
+      requestDomains: ["bing.com", "www.bing.com", "cn.bing.com", "www2.bing.com", "edgeservices.bing.com"]
+    }
+  };
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [A.MOBILE_UA_RULE_ID],
+    addRules: [rule]
+  });
+}
+
+async function clearMobileSearchSession(extra = {}) {
+  const store = await readStore();
+  const tabId = Number(store[KEYS.mobileSearchTabId] || 0);
+  await clearMobileUaRules();
+  const patch = {
+    [KEYS.mobileSearchTabId]: 0,
+    [KEYS.searchPhase]: extra.phase || ""
+  };
+  await chrome.storage.local.set(patch);
+  return tabId;
+}
+
+async function startMobileSearch() {
+  const store = await readStore();
+  if (!A.shouldRunMobileSearch(store)) {
+    return { ok: false, error: "今天不用做移动搜索" };
+  }
+  const existingId = Number(store[KEYS.mobileSearchTabId] || 0);
+  let tabId = existingId;
+  if (tabId) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (!tab || tab.id == null) tabId = 0;
+    } catch (_error) {
+      tabId = 0;
+    }
+  }
+  const url = A.buildSearchUrl("天气预报", { mobile: true });
+  if (tabId) {
+    await applyMobileUaRules(tabId);
+    await chrome.tabs.update(tabId, { active: true, url });
+  } else {
+    const blank = await chrome.tabs.create({ url: "about:blank", active: true });
+    tabId = blank.id;
+    await applyMobileUaRules(tabId);
+    await chrome.tabs.update(tabId, { url });
+  }
+  await chrome.storage.local.set({
+    [KEYS.searchPhase]: "mobile",
+    [KEYS.mobileSearchTabId]: tabId,
+    [KEYS.globalMasterTabId]: "",
+    [KEYS.globalMasterStatus]: "IDLE",
+    [KEYS.globalLastRunTime]: 0,
+    [KEYS.autoSearchLockExpires]: 0,
+    [KEYS.consecutiveNoGain]: 0,
+    [KEYS.lastStatusMessage]: "正在用手机样式做移动搜索",
+    [KEYS.autoSearchLock]: "on",
+    [KEYS.productState]: "running",
+    [KEYS.runLogs]: withLog(store, { action: "开始移动搜索" })
+  });
+  return { ok: true, tabId };
+}
+
+async function finishMobileSearch() {
+  const store = await readStore();
+  const today = A.localDateString();
+  await chrome.storage.local.set({
+    [KEYS.mobileDoneDate]: today,
+    [KEYS.runLogs]: withLog(store, { action: "移动搜索已完成" })
+  });
+  await clearMobileSearchSession({ phase: "daily" });
+  const next = await readStore();
+  const model = A.buildViewModel(next);
+  if (model.dailyEnabled && !model.dailyDone) {
+    await chrome.storage.local.set({
+      [KEYS.searchPhase]: "daily",
+      [KEYS.autoSearchLock]: "on",
+      [KEYS.productState]: "running",
+      [KEYS.lastStatusMessage]: "移动搜索已完成，正在打开每日活动"
+    });
+    await openOrWakeRewardsTab();
+    await updateBadge();
+    return { ok: true, next: "daily" };
+  }
+  await chrome.storage.local.set({ [KEYS.searchPhase]: "" });
+  await completeTodayFromBackground(next, "移动搜索已完成");
+  return { ok: true, next: "complete" };
+}
+
+async function completeTodayFromBackground(store, message) {
+  const model = A.buildViewModel(store);
+  const startedAt = A.readNumber(store, KEYS.runStartedAt, 0);
+  const durationMs = startedAt > 0 ? Date.now() - startedAt : 0;
+  const summary = A.buildTodaySummary(store, {
+    reason: "complete",
+    count: model.count,
+    limit: model.limit,
+    mobileCount: model.mobileCount,
+    durationMs,
+    at: Date.now()
+  });
+  await chrome.storage.local.set({
+    [KEYS.lastRunSummary]: summary,
+    [KEYS.lastStatusMessage]: message || "今天的任务已完成",
+    [KEYS.autoSearchLock]: "off",
+    [KEYS.waitingUserTask]: null,
+    [KEYS.productState]: "complete",
+    [KEYS.failReasonCode]: "",
+    [KEYS.searchPhase]: "",
+    [KEYS.runLogs]: withLog(store, { action: "今天的任务已完成", result: message || summary.closingLine }),
+    ...dayRecordPatch(store, {
+      reason: "complete",
+      count: model.count,
+      limit: model.limit,
+      mobileCount: model.mobileCount,
+      at: Date.now()
+    }),
+    ...clearRunFlags()
+  });
+  void notify("bing-assistant-complete", A.formatCompleteNotify(summary));
+  await updateBadge();
+}
+
 const CATCHUP_NOTE_ID = "bing-assistant-catchup";
 const MISSED_NOTE_ID = "bing-assistant-missed";
 const CATCHUP_BUTTONS = [{ title: "现在补做" }, { title: "今天算了" }];
@@ -168,6 +315,10 @@ async function applyDefaultsIfNeeded() {
   if (store[KEYS.runLogs] === undefined) patch[KEYS.runLogs] = [];
   if (store[KEYS.mobileSearchEnabled] === undefined) patch[KEYS.mobileSearchEnabled] = false;
   if (store[KEYS.mobileSearchLimit] === undefined) patch[KEYS.mobileSearchLimit] = A.DEFAULT_MOBILE_LIMIT;
+  if (store[KEYS.mobileDoneDate] === undefined) patch[KEYS.mobileDoneDate] = "";
+  if (store[KEYS.searchPhase] === undefined) patch[KEYS.searchPhase] = "";
+  if (store[KEYS.mobileSearchTabId] === undefined) patch[KEYS.mobileSearchTabId] = 0;
+  if (store[KEYS.pointsHistory] === undefined) patch[KEYS.pointsHistory] = [];
   if (store[KEYS.catchUpEnabled] === undefined) patch[KEYS.catchUpEnabled] = true;
   if (store[KEYS.catchUpAsk] === undefined) patch[KEYS.catchUpAsk] = false;
   if (store[KEYS.quizAssistEnabled] === undefined) patch[KEYS.quizAssistEnabled] = false;
@@ -212,7 +363,7 @@ async function startToday(reason = "manual") {
     return { ok: false, error: "请先登录微软账号" };
   }
   const model = A.buildViewModel(store);
-  if (model.count >= model.limit && (!model.dailyEnabled || model.dailyDone)) {
+  if (model.count >= model.limit && !model.mobilePending && (!model.dailyEnabled || model.dailyDone)) {
     await chrome.storage.local.set({ [KEYS.productState]: "complete" });
     await updateBadge();
     return { ok: false, error: "今天的任务已经完成" };
@@ -242,10 +393,14 @@ async function startToday(reason = "manual") {
     [KEYS.runStartedAt]: Date.now(),
     [KEYS.runStartPoints]: startPoints,
     [KEYS.lastStatusMessage]: action,
+    [KEYS.searchPhase]: model.count >= model.limit && model.mobilePending ? "mobile" : (model.count >= model.limit ? "daily" : "pc"),
     [KEYS.runLogs]: withLog(store, { action }),
     ...clearRunFlags()
   });
 
+  if (model.count >= model.limit && model.mobilePending) {
+    return startMobileSearch();
+  }
   if (model.count >= model.limit && model.dailyEnabled && !model.dailyDone) {
     await openOrWakeRewardsTab();
   } else {
@@ -256,6 +411,7 @@ async function startToday(reason = "manual") {
 }
 
 async function stopToday(message = "已停止") {
+  await clearMobileSearchSession({ phase: "" });
   const store = await readStore();
   const model = A.buildViewModel(store);
   await chrome.storage.local.set({
@@ -312,6 +468,10 @@ async function resumeToday(options = {}) {
     [KEYS.lastStatusMessage]: "继续今天的任务",
     [KEYS.runLogs]: options.silent ? store[KEYS.runLogs] : withLog(store, { action: "继续今天的任务" })
   });
+  const next = await readStore();
+  if (next[KEYS.searchPhase] === "mobile" && A.shouldRunMobileSearch(next)) {
+    await startMobileSearch();
+  }
   await updateBadge();
   return { ok: true };
 }
@@ -495,6 +655,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     confirmWaitingTask().then(sendResponse);
     return true;
   }
+  if (type === "START_MOBILE_SEARCH") {
+    startMobileSearch().then(sendResponse);
+    return true;
+  }
+  if (type === "MOBILE_SEARCH_FINISHED") {
+    finishMobileSearch().then(sendResponse);
+    return true;
+  }
+  if (type === "MARK_MOBILE_DONE") {
+    chrome.storage.local.set({ [KEYS.mobileDoneDate]: A.localDateString() }).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (type === "UNMARK_MOBILE_DONE") {
+    chrome.storage.local.set({ [KEYS.mobileDoneDate]: "" }).then(() => sendResponse({ ok: true }));
+    return true;
+  }
   if (type === "SET_TODAY_GOAL") {
     chrome.storage.local.set(syncGoalPatch(message.goal)).then(() => sendResponse({ ok: true }));
     return true;
@@ -589,6 +765,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const startedAt = Number(message.startedAt || 0);
     const durationMs = startedAt > 0 ? Date.now() - startedAt : 0;
     readStore().then((store) => {
+      if (reason === "complete" && A.shouldRunMobileSearch(store)) {
+        return startMobileSearch();
+      }
+      void clearMobileSearchSession({ phase: "" });
       const copy = A.failCopy(reasonCode, {
         limit: A.readNumber(store, KEYS.maxNoGainLimit, A.DEFAULT_NO_GAIN_LIMIT),
         message: message.message || "",
@@ -618,6 +798,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           reasonCode,
           count,
           limit,
+          mobileCount: A.readNumber(store, A.dailyMobileCountKey(), 0),
           at: Date.now()
         }),
         ...clearRunFlags()
@@ -639,4 +820,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   return false;
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  readStore().then((store) => {
+    if (Number(store[KEYS.mobileSearchTabId] || 0) !== tabId) return;
+    return clearMobileUaRules().then(() => chrome.storage.local.set({
+      [KEYS.mobileSearchTabId]: 0
+    }));
+  }).catch(() => {});
 });

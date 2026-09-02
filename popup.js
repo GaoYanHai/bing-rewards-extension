@@ -23,6 +23,9 @@ const whatsNewTitle = document.getElementById("whats-new-title");
 const primaryBtn = document.getElementById("primary-btn");
 const hint = document.getElementById("hint");
 const hintActions = document.getElementById("hint-actions");
+const mobileActions = document.getElementById("mobile-actions");
+const mobileDoneBtn = document.getElementById("mobile-done");
+const mobileUndoneBtn = document.getElementById("mobile-undone");
 const logBox = document.getElementById("log-box");
 const stopLink = document.getElementById("stop-link");
 
@@ -60,6 +63,14 @@ function escapeHtml(str) {
 
 function setHintActions(visible) {
   hintActions.hidden = !visible;
+}
+
+function renderMobileActions(model) {
+  if (!mobileActions) return;
+  mobileActions.hidden = !model.riskAccepted;
+  const marked = !!model.mobileDoneToday;
+  if (mobileDoneBtn) mobileDoneBtn.hidden = marked;
+  if (mobileUndoneBtn) mobileUndoneBtn.hidden = !marked;
 }
 
 function renderWeek(model) {
@@ -144,6 +155,7 @@ function render(store) {
   renderWeek(model);
   renderWhatsNew(model);
   renderLogs(model);
+  renderMobileActions(model);
 
   if (model.state === "logged_out") {
     stateLine.textContent = "还没有检测到微软账号";
@@ -158,7 +170,11 @@ function render(store) {
   if (model.state === "running" || model.state === "paused") {
     stopLink.hidden = false;
     const waitingName = model.waitingTask?.name || "";
-    if (model.count >= model.limit && model.dailyEnabled) {
+    if (model.searchPhase === "mobile" || (model.mobileEnabled && model.count >= model.limit && model.mobilePending && model.searchPhase !== "daily")) {
+      stateLine.textContent = `正在做移动搜索 ${model.mobileCount}/${model.mobileLimit}`;
+      stat3Label.textContent = "当前搜索";
+      stat3Value.textContent = model.keyword || "准备中";
+    } else if (model.count >= model.limit && model.dailyEnabled) {
       stateLine.textContent = waitingName
         ? `需要你点一下：${waitingName}`
         : (model.state === "paused" ? model.pauseText : "正在处理每日活动");
@@ -212,6 +228,7 @@ function render(store) {
     if (gained) bits.push(`大约 +${gained}`);
     bits.push(model.summary?.closingLine || model.closingLine);
     if (model.streakDays > 0) bits.push(model.streakLine);
+    else if (model.weekCompleteLine) bits.push(model.weekCompleteLine);
     if (model.mobileHint) bits.push(model.mobileHint);
     hint.textContent = bits.filter(Boolean).join("。");
     primaryBtn.dataset.action = "open";
@@ -282,6 +299,18 @@ document.getElementById("task-skip").addEventListener("click", async () => {
 document.getElementById("task-open").addEventListener("click", async () => {
   await send("OPEN_REWARDS");
 });
+if (mobileDoneBtn) {
+  mobileDoneBtn.addEventListener("click", async () => {
+    await send("MARK_MOBILE_DONE");
+    await refresh();
+  });
+}
+if (mobileUndoneBtn) {
+  mobileUndoneBtn.addEventListener("click", async () => {
+    await send("UNMARK_MOBILE_DONE");
+    await refresh();
+  });
+}
 
 document.getElementById("open-options").addEventListener("click", () => {
   chrome.runtime.openOptionsPage();

@@ -23,6 +23,9 @@ const dailyRetries = document.getElementById("daily-retries");
 const catchupEnabled = document.getElementById("catchup-enabled");
 const catchupAsk = document.getElementById("catchup-ask");
 const mobileEnabled = document.getElementById("mobile-enabled");
+const mobileLimit = document.getElementById("mobile-limit");
+const mobileDoneBtn = document.getElementById("mobile-done-btn");
+const mobileUndoneBtn = document.getElementById("mobile-undone-btn");
 const dangerEnabled = document.getElementById("danger-enabled");
 const dangerConfirm = document.getElementById("danger-confirm");
 const dangerAck = document.getElementById("danger-ack");
@@ -62,6 +65,31 @@ function escapeHtml(str) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function renderMonthChart(model) {
+  const chart = model.monthChart || A.buildMonthChartModel({});
+  const summary = document.getElementById("chart-summary");
+  const grid = document.getElementById("month-status");
+  const bars = document.getElementById("month-chart");
+  if (summary) summary.textContent = chart.summary || "还没有足够的记录";
+  if (grid) {
+    grid.innerHTML = (chart.days || []).map((cell) => {
+      return `<div class="month-cell ${escapeHtml(cell.status)}" title="${escapeHtml(cell.title)}"><span>${escapeHtml(String(cell.day))}</span></div>`;
+    }).join("");
+  }
+  if (bars) {
+    const hasGain = (chart.bars || []).some((item) => Number(item.value) > 0);
+    bars.hidden = !hasGain;
+    if (hasGain) {
+      bars.innerHTML = chart.bars.map((item) => {
+        const height = Math.max(4, Number(item.percent) || 0);
+        return `<i class="month-bar ${escapeHtml(item.status)}" title="${escapeHtml(item.date)} +${item.value || 0}" style="height:${height}%"></i>`;
+      }).join("");
+    } else {
+      bars.innerHTML = "";
+    }
+  }
 }
 
 function fill(store) {
@@ -111,6 +139,10 @@ function fill(store) {
   if (mobileQuota) mobileQuota.textContent = mobileLine;
   const mobileBasic = document.getElementById("mobile-quota-basic");
   if (mobileBasic) mobileBasic.textContent = mobileLine;
+  if (mobileLimit) mobileLimit.value = String(A.readNumber(store, A.KEYS.mobileSearchLimit, A.DEFAULT_MOBILE_LIMIT));
+  if (mobileDoneBtn) mobileDoneBtn.hidden = !!model.mobileDoneToday;
+  if (mobileUndoneBtn) mobileUndoneBtn.hidden = !model.mobileDoneToday;
+  renderMonthChart(model);
   keywordNote.textContent = model.keywordPlan?.note || A.KEYWORD_NOTE;
   if (model.keywordPlan?.fallback) {
     keywordNote.textContent = "自定义词库是空的，已改用日常短词。";
@@ -272,6 +304,19 @@ mobileEnabled.addEventListener("change", () => {
   }
   void save({ [A.KEYS.mobileSearchEnabled]: mobileEnabled.checked });
 });
+if (mobileLimit) {
+  mobileLimit.addEventListener("change", () => {
+    const value = Math.max(0, Math.round(Number(mobileLimit.value) || A.DEFAULT_MOBILE_LIMIT));
+    mobileLimit.value = String(value);
+    void save({ [A.KEYS.mobileSearchLimit]: value });
+  });
+}
+if (mobileDoneBtn) {
+  mobileDoneBtn.addEventListener("click", () => send("MARK_MOBILE_DONE"));
+}
+if (mobileUndoneBtn) {
+  mobileUndoneBtn.addEventListener("click", () => send("UNMARK_MOBILE_DONE"));
+}
 
 document.getElementById("save-custom").addEventListener("click", async () => {
   await save({

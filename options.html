@@ -77,7 +77,18 @@
         <span>移动搜索</span>
         <strong id="mobile-quota-basic">还没打开过 Rewards 读取配额</strong>
       </label>
-      <p class="help">只展示页面读到的剩余，不会改成手机搜索，也不会自动执行。</p>
+      <div class="toolbar">
+        <button id="mobile-done-btn" type="button">我已用手机做完</button>
+        <button id="mobile-undone-btn" type="button" hidden>取消标记</button>
+      </div>
+      <p class="help">默认只提醒，不自动执行。标记只对当天有效。真正执行要到下面的危险设置里打开。</p>
+    </section>
+
+    <section>
+      <h2>近 30 天</h2>
+      <p id="chart-summary" class="help">还没有足够的记录</p>
+      <div id="month-status" class="month-grid"></div>
+      <div id="month-chart" class="month-bars" hidden></div>
     </section>
 
 
@@ -193,15 +204,20 @@
         </label>
         <p class="help">默认跳过安装、购物、问卷等卡片。打开后会停下来让你自己点，不会自动完成。需把今日目标设成“尽量全做”。</p>
         <label class="row">
-          <span>自动点开测验和投票</span>
+          <span>自动点开并作答测验</span>
           <input type="checkbox" id="quiz-assist">
         </label>
-        <p class="help">打开后会自动点开测验卡片。题目仍需你自己选，不会自动作答。需把今日目标设成“尽量全做”。</p>
+        <p class="help">打开后会自动点开测验和投票，并尝试作答。失败仍会停下来让你自己点。需把今日目标设成“尽量全做”。</p>
         <label class="row">
-          <span>显示移动搜索配额</span>
+          <span>执行移动搜索</span>
           <input type="checkbox" id="mobile-enabled">
         </label>
-        <p class="help">只展示配额，不会改成手机搜索，也不会修改 User-Agent。</p>
+        <p class="help">打开后，电脑搜索做完会另开一个标签页，用手机样式继续搜。可能增加账号风险，也容易被页面识破。</p>
+        <label class="row">
+          <span>移动搜索次数</span>
+          <input type="number" id="mobile-limit" min="0" max="80" step="1">
+        </label>
+        <p class="help">若已从 Rewards 读到剩余，会优先用页面剩余。读不到才用这个数字。</p>
         <label class="row">
           <span>移动搜索配额</span>
           <strong id="mobile-quota">未启用</strong>

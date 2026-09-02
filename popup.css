@@ -246,3 +246,6 @@ footer {
 .view-help .card p { font-weight: 600; }
 .view-help .card .fineprint,
 .view-help .card p.fineprint { font-weight: 400; }
+
+.mobile-actions { margin-top: 4px; }
+.mobile-actions[hidden] { display: none; }
