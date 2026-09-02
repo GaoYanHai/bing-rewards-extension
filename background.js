@@ -60,6 +60,9 @@ async function clearMobileUaRules() {
 }
 
 async function applyMobileUaRules(tabId) {
+  if (!chrome.declarativeNetRequest || typeof chrome.declarativeNetRequest.updateSessionRules !== "function") {
+    throw new Error("dnr unavailable");
+  }
   const rule = {
     id: A.MOBILE_UA_RULE_ID,
     priority: 1,
@@ -97,10 +100,47 @@ async function clearMobileSearchSession(extra = {}) {
   return tabId;
 }
 
+async function failToday(code, extra = {}) {
+  await clearMobileSearchSession({ phase: "" });
+  const store = await readStore();
+  const copy = A.failCopy(code, extra);
+  const message = extra.message || copy.message;
+  const model = A.buildViewModel(store);
+  await chrome.storage.local.set({
+    [KEYS.lastRunSummary]: A.buildTodaySummary(store, {
+      reason: "failed",
+      reasonCode: code,
+      count: model.count,
+      limit: model.limit,
+      at: Date.now()
+    }),
+    [KEYS.lastStatusMessage]: message,
+    [KEYS.autoSearchLock]: "off",
+    [KEYS.waitingUserTask]: null,
+    [KEYS.productState]: "failed",
+    [KEYS.failReasonCode]: code,
+    [KEYS.lastError]: message,
+    [KEYS.searchPhase]: "",
+    [KEYS.runLogs]: withLog(store, { action: "已停止", result: message, reasonCode: code }),
+    ...dayRecordPatch(store, {
+      reason: "failed",
+      reasonCode: code,
+      count: model.count,
+      limit: model.limit,
+      mobileCount: model.mobileCount,
+      at: Date.now()
+    }),
+    ...clearRunFlags()
+  });
+  void notify("bing-assistant-failed", message);
+  await updateBadge();
+  return { ok: false, handled: true, error: message, reasonCode: code };
+}
+
 async function startMobileSearch() {
   const store = await readStore();
   if (!A.shouldRunMobileSearch(store)) {
-    return { ok: false, error: "今天不用做移动搜索" };
+    return { ok: false, skipped: true, error: "今天不用做移动搜索" };
   }
   const existingId = Number(store[KEYS.mobileSearchTabId] || 0);
   let tabId = existingId;
@@ -113,14 +153,21 @@ async function startMobileSearch() {
     }
   }
   const url = A.buildSearchUrl("天气预报", { mobile: true });
-  if (tabId) {
-    await applyMobileUaRules(tabId);
-    await chrome.tabs.update(tabId, { active: true, url });
-  } else {
-    const blank = await chrome.tabs.create({ url: "about:blank", active: true });
-    tabId = blank.id;
-    await applyMobileUaRules(tabId);
-    await chrome.tabs.update(tabId, { url });
+  try {
+    if (tabId) {
+      await applyMobileUaRules(tabId);
+      await chrome.tabs.update(tabId, { active: true, url });
+    } else {
+      const blank = await chrome.tabs.create({ url: "about:blank", active: true });
+      tabId = blank.id;
+      await applyMobileUaRules(tabId);
+      await chrome.tabs.update(tabId, { url });
+    }
+  } catch (_error) {
+    if (tabId) {
+      try { await chrome.tabs.remove(tabId); } catch (_closeError) {}
+    }
+    return failToday(A.FAIL_CODES.MOBILE_HEADER);
   }
   await chrome.storage.local.set({
     [KEYS.searchPhase]: "mobile",
@@ -130,12 +177,41 @@ async function startMobileSearch() {
     [KEYS.globalLastRunTime]: 0,
     [KEYS.autoSearchLockExpires]: 0,
     [KEYS.consecutiveNoGain]: 0,
-    [KEYS.lastStatusMessage]: "正在用手机样式做移动搜索",
+    [KEYS.paused]: false,
+    [KEYS.pauseReason]: "",
+    [KEYS.lastStatusMessage]: "正在做移动搜索",
     [KEYS.autoSearchLock]: "on",
     [KEYS.productState]: "running",
     [KEYS.runLogs]: withLog(store, { action: "开始移动搜索" })
   });
   return { ok: true, tabId };
+}
+
+async function advanceAfterMobile(message) {
+  await clearMobileSearchSession({ phase: "daily" });
+  const next = await readStore();
+  const model = A.buildViewModel(next);
+  const keepGoing = A.isLockOn(next) || next[KEYS.paused] === true || next[KEYS.productState] === "paused" || next[KEYS.productState] === "running";
+  if (keepGoing && model.dailyEnabled && !model.dailyDone) {
+    await chrome.storage.local.set({
+      [KEYS.searchPhase]: "daily",
+      [KEYS.autoSearchLock]: "on",
+      [KEYS.productState]: "running",
+      [KEYS.paused]: false,
+      [KEYS.pauseReason]: "",
+      [KEYS.lastStatusMessage]: message || "正在打开每日活动"
+    });
+    await openOrWakeRewardsTab();
+    await updateBadge();
+    return { ok: true, next: "daily" };
+  }
+  await chrome.storage.local.set({ [KEYS.searchPhase]: "" });
+  if (keepGoing) {
+    await completeTodayFromBackground(next, message || "移动搜索已完成");
+    return { ok: true, next: "complete" };
+  }
+  await updateBadge();
+  return { ok: true, next: "idle" };
 }
 
 async function finishMobileSearch() {
@@ -145,26 +221,74 @@ async function finishMobileSearch() {
     [KEYS.mobileDoneDate]: today,
     [KEYS.runLogs]: withLog(store, { action: "移动搜索已完成" })
   });
-  await clearMobileSearchSession({ phase: "daily" });
   const next = await readStore();
   const model = A.buildViewModel(next);
-  if (model.dailyEnabled && !model.dailyDone) {
-    await chrome.storage.local.set({
-      [KEYS.searchPhase]: "daily",
-      [KEYS.autoSearchLock]: "on",
-      [KEYS.productState]: "running",
-      [KEYS.lastStatusMessage]: "移动搜索已完成，正在打开每日活动"
-    });
-    await openOrWakeRewardsTab();
-    await updateBadge();
-    return { ok: true, next: "daily" };
+  const message = model.dailyEnabled && !model.dailyDone
+    ? "移动搜索已完成，正在打开每日活动"
+    : "移动搜索已完成";
+  return advanceAfterMobile(message);
+}
+
+async function markMobileDoneToday() {
+  const store = await readStore();
+  await chrome.storage.local.set({
+    [KEYS.mobileDoneDate]: A.localDateString(),
+    [KEYS.runLogs]: withLog(store, { action: "你已标记今天用手机做完" })
+  });
+  const next = await readStore();
+  if (next[KEYS.searchPhase] === "mobile") {
+    return advanceAfterMobile("你已标记今天用手机做完");
   }
-  await chrome.storage.local.set({ [KEYS.searchPhase]: "" });
-  await completeTodayFromBackground(next, "移动搜索已完成");
-  return { ok: true, next: "complete" };
+  await updateBadge();
+  return { ok: true };
+}
+
+async function handleMobileTabRemoved(tabId) {
+  const store = await readStore();
+  if (Number(store[KEYS.mobileSearchTabId] || 0) !== tabId) return;
+  await clearMobileUaRules();
+  const message = "移动搜索页被关掉了。点继续会重新打开";
+  const patch = {
+    [KEYS.mobileSearchTabId]: 0,
+    [KEYS.lastStatusMessage]: message
+  };
+  if (A.isLockOn(store) && store[KEYS.searchPhase] === "mobile") {
+    const keepUserPause = store[KEYS.pauseReason] === A.PAUSE_REASONS.USER;
+    patch[KEYS.paused] = true;
+    patch[KEYS.pauseReason] = keepUserPause ? A.PAUSE_REASONS.USER : A.PAUSE_REASONS.MOBILE_TAB;
+    patch[KEYS.productState] = "paused";
+    patch[KEYS.runLogs] = withLog(store, { action: "移动搜索页被关掉了", result: "点继续会重新打开" });
+  }
+  await chrome.storage.local.set(patch);
+  await updateBadge();
+}
+
+async function recoverStaleRun() {
+  const store = await readStore();
+  if (!A.isLockOn(store)) {
+    if (store[KEYS.searchPhase] || store[KEYS.mobileSearchTabId]) {
+      await clearMobileSearchSession({ phase: "" });
+    } else {
+      await clearMobileUaRules();
+    }
+    return;
+  }
+  if (store[KEYS.searchPhase] !== "mobile") return;
+  const tabId = Number(store[KEYS.mobileSearchTabId] || 0);
+  let alive = false;
+  if (tabId) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      alive = !!(tab && tab.id != null);
+    } catch (_error) {
+      alive = false;
+    }
+  }
+  if (!alive) await handleMobileTabRemoved(tabId);
 }
 
 async function completeTodayFromBackground(store, message) {
+  await clearMobileSearchSession({ phase: "" });
   const model = A.buildViewModel(store);
   const startedAt = A.readNumber(store, KEYS.runStartedAt, 0);
   const durationMs = startedAt > 0 ? Date.now() - startedAt : 0;
@@ -432,7 +556,9 @@ async function pauseToday(reason = A.PAUSE_REASONS.USER, message) {
   if (!A.isLockOn(store)) {
     return { ok: false, error: "还没有开始今天的任务" };
   }
-  const pauseReason = reason === A.PAUSE_REASONS.BUSY ? A.PAUSE_REASONS.BUSY : A.PAUSE_REASONS.USER;
+  const pauseReason = reason === A.PAUSE_REASONS.BUSY
+    ? A.PAUSE_REASONS.BUSY
+    : (reason === A.PAUSE_REASONS.MOBILE_TAB ? A.PAUSE_REASONS.MOBILE_TAB : A.PAUSE_REASONS.USER);
   if (store[KEYS.paused] === true && store[KEYS.pauseReason] === pauseReason) {
     return { ok: true };
   }
@@ -446,8 +572,8 @@ async function pauseToday(reason = A.PAUSE_REASONS.USER, message) {
     [KEYS.productState]: "paused",
     [KEYS.lastStatusMessage]: status
   };
-  if (pauseReason === A.PAUSE_REASONS.USER) {
-    patch[KEYS.runLogs] = withLog(store, { action: "已暂停", result: status });
+  if (pauseReason === A.PAUSE_REASONS.USER || pauseReason === A.PAUSE_REASONS.MOBILE_TAB) {
+    patch[KEYS.runLogs] = withLog(store, { action: pauseReason === A.PAUSE_REASONS.MOBILE_TAB ? "移动搜索页被关掉了" : "已暂停", result: status });
   }
   await chrome.storage.local.set(patch);
   await updateBadge();
@@ -574,11 +700,12 @@ function refreshKeywordPlan(store) {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  void applyDefaultsIfNeeded().then(scheduleNextAlarm).then(updateBadge);
+  void applyDefaultsIfNeeded().then(recoverStaleRun).then(scheduleNextAlarm).then(updateBadge);
 });
 
 chrome.runtime.onStartup.addListener(() => {
   void applyDefaultsIfNeeded()
+    .then(recoverStaleRun)
     .then(scheduleNextAlarm)
     .then(async () => {
       const reminded = await maybeRemindMissed();
@@ -664,7 +791,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (type === "MARK_MOBILE_DONE") {
-    chrome.storage.local.set({ [KEYS.mobileDoneDate]: A.localDateString() }).then(() => sendResponse({ ok: true }));
+    markMobileDoneToday().then(sendResponse);
     return true;
   }
   if (type === "UNMARK_MOBILE_DONE") {
@@ -764,11 +891,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const limit = Number(message.limit || A.DEFAULT_SEARCH_LIMIT);
     const startedAt = Number(message.startedAt || 0);
     const durationMs = startedAt > 0 ? Date.now() - startedAt : 0;
-    readStore().then((store) => {
+    readStore().then(async (store) => {
       if (reason === "complete" && A.shouldRunMobileSearch(store)) {
-        return startMobileSearch();
+        const started = await startMobileSearch();
+        if (started && (started.ok || started.handled)) return;
       }
-      void clearMobileSearchSession({ phase: "" });
+      await clearMobileSearchSession({ phase: "" });
       const copy = A.failCopy(reasonCode, {
         limit: A.readNumber(store, KEYS.maxNoGainLimit, A.DEFAULT_NO_GAIN_LIMIT),
         message: message.message || "",
@@ -823,10 +951,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  readStore().then((store) => {
-    if (Number(store[KEYS.mobileSearchTabId] || 0) !== tabId) return;
-    return clearMobileUaRules().then(() => chrome.storage.local.set({
-      [KEYS.mobileSearchTabId]: 0
-    }));
-  }).catch(() => {});
+  void handleMobileTabRemoved(tabId);
 });

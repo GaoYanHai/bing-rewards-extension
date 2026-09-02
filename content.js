@@ -1253,6 +1253,10 @@ function quizPageKind() {
 }
 
 function quizPageNextStep(name) {
+    const waiting = getVal(BingAssistant.KEYS.waitingUserTask, null) || {};
+    if (hasQuizAssistGaveUp({ name, url: waiting.url })) {
+        return BingAssistant.formatQuizAssistFallback();
+    }
     let nodeCount = 0;
     try {
         nodeCount = document.querySelectorAll(BingAssistant.QUOTA_SELECTORS.quizCount).length;
@@ -1457,27 +1461,74 @@ function isVisibleElement(el) {
 }
 
 function isQuizCompleteUi() {
-    if (document.querySelector("#quizCompleteContainer, .rqcompleted, #quizComplete, .quizComplete")) return true;
+    if (document.querySelector("#quizCompleteContainer, .rqcompleted, #quizComplete, .quizComplete, #quizCompleteContainer .c-glyph")) return true;
     const snippet = ((document.body && document.body.innerText) || "").slice(0, 2500);
-    return /quiz complete|you earned|测验完成|已完成测验/i.test(snippet) && !document.querySelector("[id^=rqAnswerOption]");
+    return /quiz complete|you earned|测验完成|已完成测验/i.test(snippet) && !document.querySelector("[id^=rqAnswerOption], .rqOption, .btOption, .wk_Circle");
+}
+
+function isUnsafeQuizTarget(el) {
+    if (!el || !el.closest) return true;
+    if (el.closest("header, footer, nav, #id_h, #id_s, #id_l, #id_a, .b_ad, .ads, #b_notificationContainer, .b_footer, #fbpgbt, #b_header, #sb_form")) return true;
+    const href = String((el.getAttribute && el.getAttribute("href")) || (el.closest("a") && el.closest("a").getAttribute("href")) || "").toLowerCase();
+    const label = `${el.id || ""} ${el.className || ""} ${el.getAttribute && el.getAttribute("aria-label") || ""} ${el.textContent || ""} ${href}`.toLowerCase();
+    return /login|sign[\s-]?in|sign[\s-]?up|account|advert|adsbygoogle|privacy|cookie|redeem|microsoft\.com\/account/.test(label);
+}
+
+function quizQuestionFingerprint() {
+    const node = document.querySelector(".rqQ, .rqQuestion, #rqQuestion, .TriviaOverlayData, .bt_poll, [data-bi-id*='quiz'], [data-bi-id*='thisorthat']");
+    const text = String((node && node.innerText) || (document.body && document.body.innerText) || "").replace(/\s+/g, " ").slice(0, 180);
+    const options = Array.from(document.querySelectorAll("[id^=rqAnswerOption], .rqOption, .btOption, .wk_Circle")).map((el) => el.id || el.className).join("|");
+    return `${location.pathname}|${text}|${options}`.slice(0, 400);
+}
+
+function quizAssistGaveUpKey(waiting) {
+    return (waiting && waiting.url) || location.href;
+}
+
+function hasQuizAssistGaveUp(waiting) {
+    return sessionStorage.getItem("Rebang_QuizAssistGaveUp") === quizAssistGaveUpKey(waiting);
+}
+
+function markQuizAssistGaveUp(waiting) {
+    sessionStorage.setItem("Rebang_QuizAssistGaveUp", quizAssistGaveUpKey(waiting));
+}
+
+function clearQuizAssistHits() {
+    sessionStorage.removeItem("Rebang_QuizAssistFp");
+    sessionStorage.removeItem("Rebang_QuizAssistHits");
+}
+
+function noteQuizAssistAttempt() {
+    const fp = quizQuestionFingerprint();
+    const last = sessionStorage.getItem("Rebang_QuizAssistFp");
+    let hits = Number(sessionStorage.getItem("Rebang_QuizAssistHits") || 0);
+    hits = last === fp ? hits + 1 : 1;
+    sessionStorage.setItem("Rebang_QuizAssistFp", fp);
+    sessionStorage.setItem("Rebang_QuizAssistHits", String(hits));
+    return hits;
+}
+
+function currentQuizAssistHits(fp) {
+    if (sessionStorage.getItem("Rebang_QuizAssistFp") !== fp) return 0;
+    return Number(sessionStorage.getItem("Rebang_QuizAssistHits") || 0);
 }
 
 function findQuizClickTarget() {
-    const start = document.querySelector("#rqStartQuiz, #startQuiz, input#rqStartQuiz, button#rqStartQuiz");
-    if (start && isVisibleElement(start)) return start;
-    const options = Array.from(document.querySelectorAll("[id^=rqAnswerOption], .rqOption, .rq_answer, .rqQuestion .rqOption, .btOption, .bt_option"));
+    const start = document.querySelector("#rqStartQuiz, #startQuiz, input#rqStartQuiz, button#rqStartQuiz, .rqStartQuiz, [data-bi-id*='startquiz']");
+    if (start && isVisibleElement(start) && !isUnsafeQuizTarget(start)) return start;
+    const options = Array.from(document.querySelectorAll("[id^=rqAnswerOption], .rqOption, .rq_answer, .rqQuestion .rqOption, .rqGOptions .rqOption, .btOption, .bt_option, .bt_poll .btOption, [id^=btoption], [data-bi-id*='thisorthat'] button, [data-bi-id*='poll'] button"));
     const clickable = options.filter((el) => {
-        if (!isVisibleElement(el)) return false;
+        if (!isVisibleElement(el) || isUnsafeQuizTarget(el)) return false;
         const cls = `${el.className || ""} ${el.getAttribute("aria-label") || ""}`;
-        if (/wrong|disabled|selected|correct/i.test(cls) && /wrong|disabled/i.test(cls)) return false;
-        if (el.closest(".rqWrong, .wrongAnswer, .isWrong")) return false;
+        if (/wrong|disabled/i.test(cls)) return false;
+        if (el.closest(".rqWrong, .wrongAnswer, .isWrong, .b_ad, header, footer, nav")) return false;
         return true;
     });
     if (clickable.length) {
-        const unused = clickable.filter((el) => !/selected|isCorrect|correct/i.test(`${el.className || ""}`));
-        return (unused[0] || clickable[0]);
+        const unused = clickable.filter((el) => !/selected|isCorrect|correct/i.test(`${el.className || ""} ${el.getAttribute("aria-label") || ""}`));
+        return unused[0] || clickable[0];
     }
-    const circles = Array.from(document.querySelectorAll(".wk_Circle, .wk_circle")).filter(isVisibleElement);
+    const circles = Array.from(document.querySelectorAll(".wk_Choices .wk_Circle, .wk_Circle, .wk_circle")).filter((el) => isVisibleElement(el) && !isUnsafeQuizTarget(el));
     if (circles.length) return circles.find((el) => !/selected|current|correct/i.test(`${el.className || ""}`)) || circles[0];
     return null;
 }
@@ -1486,19 +1537,34 @@ let quizSolveInFlight = false;
 function scheduleQuizAutoSolve(waiting) {
     if (quizSolveInFlight) return true;
     if (!BingAssistant.allowsQuizAssist(rebangExtensionStore)) return false;
+    if (BingAssistant.effectiveGoal(rebangExtensionStore) !== BingAssistant.GOALS.TRY_ALL) return false;
+    if (hasQuizAssistGaveUp(waiting)) return false;
     if (isQuizCompleteUi()) {
-        showUserMessage("测验看起来已完成，正在返回清单");
+        clearQuizAssistHits();
+        showUserMessage("测验看起来已完成，正在返回清单", { action: "测验已完成", result: "正在返回清单" });
         setTimeout(() => returnToRewardsDashboard("测验已完成，正在返回清单"), 900);
         return true;
     }
     const target = findQuizClickTarget();
     if (!target) return false;
+    const fp = quizQuestionFingerprint();
+    if (currentQuizAssistHits(fp) >= BingAssistant.QUIZ_ASSIST_MAX_HITS) {
+        markQuizAssistGaveUp(waiting);
+        showUserMessage(BingAssistant.formatQuizAssistFallback(), {
+            action: waiting && waiting.name ? `正在作答：${waiting.name}` : "正在作答测验",
+            result: "已退回你自己点"
+        });
+        return false;
+    }
     quizSolveInFlight = true;
-    showUserMessage(waiting && waiting.name ? `正在作答：${waiting.name}` : "正在自动作答测验");
+    showUserMessage(waiting && waiting.name ? `正在作答：${waiting.name}` : "正在作答测验", {
+        action: waiting && waiting.name ? `正在作答：${waiting.name}` : "正在作答测验"
+    });
     setTimeout(() => {
         quizSolveInFlight = false;
         if (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) return;
-        try { target.click(); } catch (_error) {}
+        if (hasQuizAssistGaveUp(waiting)) return;
+        try { target.click(); noteQuizAssistAttempt(); } catch (_error) {}
     }, 800 + Math.floor(Math.random() * 900));
     return true;
 }
@@ -1838,7 +1904,7 @@ async function doAutoSearch() {
       return;
   }
   const login = detectLoginState();
-  if (login === "out") {
+  if (login === "out" && track.kind !== "mobile") {
       stopForLogin(true);
       return;
   }
@@ -1858,12 +1924,17 @@ async function doAutoSearch() {
   rememberStartPoints(currentPoints);
   if (currentPoints === null) {
       pointsMissCount += 1;
-      if (document.readyState === "complete" && pointsMissCount >= 8) {
+      const missLimit = track.kind === "mobile" ? 10 : 8;
+      if (document.readyState === "complete" && pointsMissCount >= missLimit) {
+          if (track.kind === "mobile") {
+              stopForReason(BingAssistant.FAIL_CODES.MOBILE_POINTS);
+              return;
+          }
           if (login === "in") stopForReason(BingAssistant.FAIL_CODES.PAGE_CHANGED, { where: "search" });
           else stopForLogin(true);
           return;
       }
-      showUserMessage("正在确认登录和积分...");
+      showUserMessage(track.kind === "mobile" ? "正在确认这次移动搜索的积分..." : "正在确认登录和积分...");
       return;
   }
   pointsMissCount = 0;
@@ -1926,6 +1997,10 @@ async function doAutoSearch() {
 
           // 连续无积分保护逻辑
           if (consecutiveNoGain >= maxNoGainLimit) {
+              if (track.kind === "mobile") {
+                  stopForReason(BingAssistant.FAIL_CODES.MOBILE_NO_GAIN, { limit: maxNoGainLimit });
+                  return;
+              }
               const code = currentSearchCount === 0 ? BingAssistant.FAIL_CODES.RISK : BingAssistant.FAIL_CODES.NO_GAIN;
               stopForReason(code, { limit: maxNoGainLimit });
               return;

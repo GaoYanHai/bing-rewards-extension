@@ -170,7 +170,11 @@ function render(store) {
   if (model.state === "running" || model.state === "paused") {
     stopLink.hidden = false;
     const waitingName = model.waitingTask?.name || "";
-    if (model.searchPhase === "mobile" || (model.mobileEnabled && model.count >= model.limit && model.mobilePending && model.searchPhase !== "daily")) {
+    if (model.pauseReason === A.PAUSE_REASONS.MOBILE_TAB) {
+      stateLine.textContent = "移动搜索页被关掉了";
+      stat3Label.textContent = "当前搜索";
+      stat3Value.textContent = `${model.mobileCount}/${model.mobileLimit}`;
+    } else if (model.searchPhase === "mobile" || (model.mobileEnabled && model.count >= model.limit && model.mobilePending && model.searchPhase !== "daily")) {
       stateLine.textContent = `正在做移动搜索 ${model.mobileCount}/${model.mobileLimit}`;
       stat3Label.textContent = "当前搜索";
       stat3Value.textContent = model.keyword || "准备中";
@@ -193,15 +197,19 @@ function render(store) {
     if (model.state === "paused") {
       primaryBtn.textContent = "继续";
       primaryBtn.dataset.action = "resume";
-      hint.textContent = model.pauseReason === A.PAUSE_REASONS.BUSY
-        ? "你正在用电脑，已暂时停下。条件消失后会自动继续。"
-        : "已暂停，进度还在。点继续即可接着做。";
+      if (model.pauseReason === A.PAUSE_REASONS.MOBILE_TAB) {
+        hint.textContent = "移动搜索页被关掉了。点继续会重新打开";
+      } else if (model.pauseReason === A.PAUSE_REASONS.BUSY) {
+        hint.textContent = "你正在用电脑，已暂时停下。条件消失后会自动继续。";
+      } else {
+        hint.textContent = "已暂停，进度还在。点继续即可接着做。";
+      }
     } else {
       primaryBtn.textContent = "暂停";
       primaryBtn.dataset.action = "pause";
       hint.textContent = model.statusMessage || `正在模拟常规搜索，间隔 ${model.intervalMin}-${model.intervalMax} 秒。`;
     }
-    if (model.elapsedMs > 0) {
+    if (model.elapsedMs > 0 && model.pauseReason !== A.PAUSE_REASONS.MOBILE_TAB) {
       hint.textContent = `已用时 ${A.formatDuration(model.elapsedMs)}。${hint.textContent}`;
     }
     if (model.pcQuotaHint && !waitingName) {
