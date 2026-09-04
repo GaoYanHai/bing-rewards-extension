@@ -1,0 +1,47 @@
+# Edge Add-ons 审核问答备忘（与 2.5.0 已提交说明一致）
+
+给审核员看的人话。2.6.0 功能更新，不改权限、不换产品名、不撤回 2.5.0 审核包。
+
+## 单一用途
+
+这个扩展只做一件事：在浏览器开着的时候，帮你完成今天的 Bing 电脑搜索，并看清还剩多少。
+
+默认只做电脑搜索。移动搜索和测验作答是可选的危险项，需要你在设置里确认后才会打开。不保证能做满。
+
+## 为什么要 bing.com
+
+要在 Bing 搜索页执行搜索，并在 Rewards 页读取积分、任务和今日配额。不会读取 Bing / Rewards 以外的网站。
+
+host 权限只有：https://*.bing.com/*
+
+## 为什么要改请求头
+
+权限名：declarativeNetRequestWithHostAccess
+
+默认不改请求头。只有你打开危险设置里的「执行移动搜索」后，才会把指定标签页的请求改成手机样式，而且只用于 bing.com。
+
+关掉危险设置总开关后，内层选项全部无效。
+
+## 收集哪些数据
+
+不收集。不上传账号、积分、搜索词或日志。
+
+设置、词库、今日进度、近 30 天记录、配额缓存、当天手机完成标记和运行日志，只存在你的浏览器本地。
+
+隐私政策：https://github.com/GaoYanHai/bing-rewards-extension/blob/main/PRIVACY.md
+
+## 各项权限（与已提交后台填写一致）
+
+- alarms：保存每日自动开始的闹钟
+- storage：保存设置、进度和运行状态，只存在本机
+- tabs：打开或唤醒 Bing 搜索 / Rewards 标签页
+- notifications：完成或失败时提醒你
+- declarativeNetRequestWithHostAccess：仅在你打开危险设置里的移动搜索后，把指定标签页的请求改成手机样式；默认不改
+- https://*.bing.com/*：在 Bing 搜索页和 Rewards 页读取积分、任务和今日配额
+
+## 2.6 没有改的事
+
+- 不改 permissions / host_permissions
+- 不加 Cookie / 无痕 / 第二套登录态
+- 不自动点 Edge 奖励
+- 不承诺关闭浏览器也能跑，也不承诺移动搜索、测验或 Edge 奖励能做满

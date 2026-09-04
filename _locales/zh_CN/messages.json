@@ -1,0 +1,5 @@
+{
+  "extName": { "message": "Bing 积分助手" },
+  "extDescription": { "message": "帮你在浏览器开着的时候完成今天的 Bing 电脑搜索，并看清还剩多少。" },
+  "extDefaultTitle": { "message": "Bing 积分助手" }
+}

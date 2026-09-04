@@ -1,0 +1,79 @@
+# 2.6.0 下次更新用
+
+2.6 是功能更新：Edge 奖励只展示、配额读得更稳、测验常见题型覆盖更好。
+权限表、产品名、隐私政策与下方 2.5.0 已提交说明保持一致，不要两套说法。
+已提交的 2.5.0 审核包不必撤回。2.6 等过审或被打回后再作为商店更新上传。
+商店地址未过审前不要写进 README。
+
+# Edge Add-ons 提交用文案（2.5.0）
+
+安装包：bing-rewards-extension-2.5.0.zip
+提交页：https://partner.microsoft.com/dashboard/microsoftedge/overview
+隐私政策：https://github.com/GaoYanHai/bing-rewards-extension/blob/main/PRIVACY.md
+主页：https://github.com/GaoYanHai/bing-rewards-extension
+支持：https://github.com/GaoYanHai/bing-rewards-extension/issues
+
+## 产品名
+
+Bing 积分助手
+
+## 简称 / Search title
+
+Bing Rewards Assistant
+
+## 短描述（商店卡片，建议不超过 132 字）
+
+帮你在浏览器开着的时候完成今天的 Bing 电脑搜索，并看清还剩多少。默认只做电脑搜索。
+
+## 完整描述
+
+Bing 积分助手帮你在 Edge 开着的时候完成今天的 Bing 电脑搜索，并在工具栏里看清进度。
+
+默认只做电脑搜索，不点击高风险活动，也不会改装成手机搜索。移动搜索和测验作答是可选的危险项，需要你在设置里确认后才会打开；失败会停下来告诉你下一步，不保证能做满。
+
+你可以：
+- 在 Popup 里开始、暂停、继续或停止今天的任务
+- 查看电脑搜索和每日活动进度
+- 设置每天自动开始时间；浏览器开着时到点会开始，错过了会补做
+- 未登录时停下来，提示去登录微软账号
+- 导入自己的搜索词，换一批，或拉黑某个词
+
+注意：
+- 浏览器完全退出、电脑关机或睡眠时，扩展无法自己运行
+- 自动搜索和自动点击可能不符合 Microsoft Rewards 使用规则，存在积分无效或账号受限的风险，请自行判断
+
+本扩展不上传账号、积分、搜索词或日志。设置和进度只存在你的浏览器本地。
+
+## 类别
+
+Productivity / 效率
+
+## 权限说明（审核员可见）
+
+- alarms：保存每日自动开始的闹钟
+- storage：保存设置、进度和运行状态，只存在本机
+- tabs：打开或唤醒 Bing 搜索 / Rewards 标签页
+- notifications：完成或失败时提醒你
+- declarativeNetRequestWithHostAccess：仅在你打开危险设置里的移动搜索后，把指定标签页的请求改成手机样式；默认不改
+- https://*.bing.com/*：在 Bing 搜索页和 Rewards 页读取积分、任务和今日配额
+
+## 截图建议（至少 1 张，建议 1280x800 或 640x400）
+
+1. Popup：今天还没开始
+2. Popup：运行中
+3. Popup：今天已完成
+4. 选项页：基础设置第一屏
+5. 选项页：近 30 天记录
+
+不要出现「刷移动」「UA」「主控」等词。
+
+## 年龄分级
+
+适合所有年龄 / 3+
+
+## 提交时不要写
+
+- 稳定刷满
+- 无损账号
+- 一定能做完移动搜索
+- 关闭浏览器也能跑
