@@ -6,6 +6,8 @@
 
 当前版本：2.6.0
 
+商店：[在 Edge 加载项中获取](https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj)
+
 ## 功能
 
 - 工具栏正式图标、徽章和 Popup，不必先打开 Bing
@@ -34,6 +36,10 @@
 - 选项页可查看近 30 天完成情况；没有记录时不会看起来像已经失败一个月
 
 ## 安装
+
+推荐从 [Edge 加载项](https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj) 安装。
+
+也可以手动加载：
 
 1. 打开 Edge 的 `edge://extensions/` 或 Chrome 的 `chrome://extensions/`。
 2. 打开“开发人员模式”。
@@ -64,6 +70,8 @@
 自动搜索和自动点击可能不符合 Microsoft Rewards 使用规则，存在积分无效或账号受限的风险。请自行判断并承担使用后果。
 
 ## 商店简介
+
+已在 Microsoft Edge 加载项上架：[Bing 积分助手](https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj)
 
 帮你在浏览器开着的时候完成今天的 Bing 电脑搜索，并看清还剩多少。默认只做电脑搜索。移动搜索和测验作答是可选的危险项，失败会停下来告诉你下一步，不保证能做满。
 
