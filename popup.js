@@ -237,7 +237,7 @@ function render(store) {
     bits.push(model.summary?.closingLine || model.closingLine);
     if (model.streakDays > 0) bits.push(model.streakLine);
     else if (model.weekCompleteLine) bits.push(model.weekCompleteLine);
-    if (model.mobileHint) bits.push(model.mobileHint);
+    if (model.completeQuotaHint) bits.push(model.completeQuotaHint);
     hint.textContent = bits.filter(Boolean).join("。");
     primaryBtn.dataset.action = "open";
     return;

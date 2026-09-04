@@ -1272,8 +1272,8 @@ function saveRewardsQuotasIfAny() {
         const texts = [];
         const seen = new Set();
         const pushText = (value) => {
-            const text = String(value || "").replace(/\s+/g, " ").trim();
-            if (!text || text.length > 500 || seen.has(text)) return;
+            const text = String(value || "").replace(/[ \t\u00a0]+/g, " ").replace(/\r\n?/g, "\n").trim();
+            if (!text || text.length > 800 || seen.has(text)) return;
             seen.add(text);
             texts.push(text);
         };
@@ -1284,7 +1284,10 @@ function saveRewardsQuotasIfAny() {
             pushText($node.attr("title"));
             pushText($node.text());
         };
-        $(BingAssistant.QUOTA_SELECTORS.cards).each(function() { collectNode(this); });
+        $(BingAssistant.QUOTA_SELECTORS.cards).each(function() {
+            collectNode(this);
+            $(this).children().each(function() { collectNode(this); });
+        });
         $(BingAssistant.QUOTA_SELECTORS.breakdown).each(function() {
             collectNode(this);
             $(this).children().each(function() { collectNode(this); });
@@ -1469,9 +1472,11 @@ function isQuizCompleteUi() {
 function isUnsafeQuizTarget(el) {
     if (!el || !el.closest) return true;
     if (el.closest("header, footer, nav, #id_h, #id_s, #id_l, #id_a, .b_ad, .ads, #b_notificationContainer, .b_footer, #fbpgbt, #b_header, #sb_form")) return true;
+    if (el.closest("#b_results, .b_algo") && !el.closest("#rqOverlay, #rqPanel, .TriviaOverlayData, .btOverlay, .bt_poll, .rqQuestion, mee-rewards-quiz")) return true;
     const href = String((el.getAttribute && el.getAttribute("href")) || (el.closest("a") && el.closest("a").getAttribute("href")) || "").toLowerCase();
+    if (/^https?:/.test(href) && !/(?:^|\.)bing\.com|rewards\.bing\.com/.test(href)) return true;
     const label = `${el.id || ""} ${el.className || ""} ${el.getAttribute && el.getAttribute("aria-label") || ""} ${el.textContent || ""} ${href}`.toLowerCase();
-    return /login|sign[\s-]?in|sign[\s-]?up|account|advert|adsbygoogle|privacy|cookie|redeem|microsoft\.com\/account/.test(label);
+    return /login|sign[\s-]?in|sign[\s-]?up|account|advert|adsbygoogle|privacy|cookie|redeem|microsoft\.com\/account|登录|注册|广告|兑换/.test(label);
 }
 
 function quizQuestionFingerprint() {
@@ -1513,22 +1518,92 @@ function currentQuizAssistHits(fp) {
     return Number(sessionStorage.getItem("Rebang_QuizAssistHits") || 0);
 }
 
-function findQuizClickTarget() {
-    const start = document.querySelector("#rqStartQuiz, #startQuiz, input#rqStartQuiz, button#rqStartQuiz, .rqStartQuiz, [data-bi-id*='startquiz']");
-    if (start && isVisibleElement(start) && !isUnsafeQuizTarget(start)) return start;
-    const options = Array.from(document.querySelectorAll("[id^=rqAnswerOption], .rqOption, .rq_answer, .rqQuestion .rqOption, .rqGOptions .rqOption, .btOption, .bt_option, .bt_poll .btOption, [id^=btoption], [data-bi-id*='thisorthat'] button, [data-bi-id*='poll'] button"));
-    const clickable = options.filter((el) => {
-        if (!isVisibleElement(el) || isUnsafeQuizTarget(el)) return false;
-        const cls = `${el.className || ""} ${el.getAttribute("aria-label") || ""}`;
-        if (/wrong|disabled/i.test(cls)) return false;
-        if (el.closest(".rqWrong, .wrongAnswer, .isWrong, .b_ad, header, footer, nav")) return false;
-        return true;
+function firstSafeQuizEl(selectors, extraFilter) {
+    const nodes = [];
+    (Array.isArray(selectors) ? selectors : [selectors]).forEach((sel) => {
+        try {
+            document.querySelectorAll(sel).forEach((el) => nodes.push(el));
+        } catch (_error) {}
     });
+    return nodes.find((el) => {
+        if (!isVisibleElement(el) || isUnsafeQuizTarget(el)) return false;
+        return extraFilter ? extraFilter(el) : true;
+    }) || null;
+}
+
+function isUsableQuizOption(el) {
+    const cls = `${el.className || ""} ${el.getAttribute("aria-label") || ""} ${el.getAttribute("aria-disabled") || ""}`;
+    if (/wrong|disabled/i.test(cls)) return false;
+    if (el.closest(".rqWrong, .wrongAnswer, .isWrong, .b_ad, header, footer, nav")) return false;
+    return true;
+}
+
+function findQuizClickTarget() {
+    const start = firstSafeQuizEl([
+        "#rqStartQuiz",
+        "#startQuiz",
+        "input#rqStartQuiz",
+        "button#rqStartQuiz",
+        ".rqStartQuiz",
+        "#rqStartQuizBtn",
+        "[data-bi-id*='startquiz' i]",
+        "[data-bi-id*='start-quiz' i]",
+        "input[id*='StartQuiz' i]",
+        "button[id*='StartQuiz' i]",
+        "[aria-label*='Start the quiz' i]",
+        "[aria-label*='开始测验']",
+        "input[value='Start the quiz' i]",
+        "input[value='Start quiz' i]",
+        "input[value='开始测验']",
+        "button[value='Start the quiz' i]"
+    ]);
+    if (start) return start;
+    const optionSelectors = [
+        "[id^=rqAnswerOption]",
+        ".rqOption",
+        ".rq_answer",
+        ".rqQuestion .rqOption",
+        ".rqGOptions .rqOption",
+        "#rqOverlayContainer [id^=rqAnswerOption]",
+        ".TriviaOverlayData .rqOption",
+        ".btOption",
+        ".bt_option",
+        "a.btOption",
+        "button.btOption",
+        ".btOverlay .btOption",
+        ".btOverlay .bt_option",
+        ".bt_choices .btOption",
+        ".bt_choices a",
+        ".btOptionCard",
+        "[id^=btoption]",
+        "[id^=btOption]",
+        "[data-bi-id*='thisorthat' i] button",
+        "[data-bi-id*='thisorthat' i] a",
+        "[data-bi-id*='thisorthat' i] img",
+        "[data-bi-id*='thisorthat' i] [role='button']",
+        ".bt_poll .btOption",
+        ".bt_poll a",
+        ".bt_poll button",
+        ".bt_poll label",
+        ".bt_poll [role='button']",
+        ".btPollOption",
+        ".bt_PollOption",
+        "[data-bi-id*='poll' i] button",
+        "[data-bi-id*='poll' i] a",
+        "[data-bi-id*='vote' i] button"
+    ];
+    const options = [];
+    optionSelectors.forEach((sel) => {
+        try {
+            document.querySelectorAll(sel).forEach((el) => options.push(el));
+        } catch (_error) {}
+    });
+    const clickable = options.filter((el) => isVisibleElement(el) && !isUnsafeQuizTarget(el) && isUsableQuizOption(el));
     if (clickable.length) {
         const unused = clickable.filter((el) => !/selected|isCorrect|correct/i.test(`${el.className || ""} ${el.getAttribute("aria-label") || ""}`));
         return unused[0] || clickable[0];
     }
-    const circles = Array.from(document.querySelectorAll(".wk_Choices .wk_Circle, .wk_Circle, .wk_circle")).filter((el) => isVisibleElement(el) && !isUnsafeQuizTarget(el));
+    const circles = Array.from(document.querySelectorAll(".wk_Choices .wk_Circle, .wk_Circle, .wk_circle, .wk_hotspot")).filter((el) => isVisibleElement(el) && !isUnsafeQuizTarget(el));
     if (circles.length) return circles.find((el) => !/selected|current|correct/i.test(`${el.className || ""}`)) || circles[0];
     return null;
 }
