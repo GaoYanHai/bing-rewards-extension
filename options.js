@@ -139,6 +139,8 @@ function fill(store) {
   if (mobileQuota) mobileQuota.textContent = mobileLine;
   const mobileBasic = document.getElementById("mobile-quota-basic");
   if (mobileBasic) mobileBasic.textContent = mobileLine;
+  const edgeBasic = document.getElementById("edge-quota-basic");
+  if (edgeBasic) edgeBasic.textContent = model.edgeQuotaLine || "还没读到";
   if (mobileLimit) mobileLimit.value = String(A.readNumber(store, A.KEYS.mobileSearchLimit, A.DEFAULT_MOBILE_LIMIT));
   if (mobileDoneBtn) mobileDoneBtn.hidden = !!model.mobileDoneToday;
   if (mobileUndoneBtn) mobileUndoneBtn.hidden = !model.mobileDoneToday;

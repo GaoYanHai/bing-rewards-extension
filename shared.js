@@ -18,7 +18,7 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "2.5.0";
+  const PRODUCT_VERSION = "2.6.0";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -107,7 +107,7 @@ const BingAssistant = (() => {
     cards: "mee-card, mee-rewards-daily-set-item-content, .c-card-content, .rewards-card, mee-rewards-point-breakdown, .pointsBreakdown, .pointsBreakdownCard, [class*='pointsBreakdown']",
     breakdown: "#pointsBreakdown, .pointsBreakdown, mee-rewards-points-breakdown, .points-breakdown, mee-rewards-user-status-banner, [class*='points-breakdown']",
     dailySection: "mee-rewards-daily-set-section, #daily-sets, .daily-set-section, [id*='dailySet'], [id*='daily-set']",
-    labeled: "[aria-label*='search' i], [aria-label*='Search'], [aria-label*='搜索'], [aria-label*='Daily'], [aria-label*='每日']",
+    labeled: "[aria-label*='search' i], [aria-label*='Search'], [aria-label*='搜索'], [aria-label*='Daily'], [aria-label*='每日'], [aria-label*='Edge'], [aria-label*='Microsoft Edge'], [aria-label*='edge bonus' i], [aria-label*='奖励']",
     quizCount: ".rqQ, .rqQuestion, .wk_Circle, .TriviaOverlayData li, [aria-label*='Question']"
   };
 
@@ -528,11 +528,11 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "2.5 失败会停下来，并告诉你下一步",
+      title: "2.6 能看见页面上还剩什么",
       points: [
-        "移动搜索加不到分、标签页被关掉或没法改成手机样式时，会停并说人话",
-        "测验自动作答同一题点几次仍在，会退回「我点完了 / 跳过」",
-        "新用户的 30 天图是空的，不会看起来像已经失败一个月"
+        "打开过 Rewards 后，若读到 Edge 奖励剩余会提一句；读不到不编、不自动点",
+        "电脑 / 移动 / 每日活动配额在中英混排时更不容易读空",
+        "测验常见题型更能点到选项；同一题 6 次仍在会退回你自己点"
       ]
     };
   }
@@ -851,13 +851,18 @@ const BingAssistant = (() => {
   }
 
   function classifyQuotaKind(text) {
-    const t = String(text || "").toLowerCase();
-    if (/microsoft edge|edge bonus|edge 奖励|通过\s*microsoft\s*edge|edge 上搜索/.test(t) && !/pc search|电脑/.test(t)) return "edge";
-    if (/mobile search|移动(设备)?搜索|手机搜索|via mobile|bing mobile|search on mobile|在移动设备上搜索|在手机上搜索|移动端搜索/.test(t)) return "mobile";
-    if (/pc search|desktop search|computer search|电脑搜索|电脑上搜索|在电脑上搜索|search on (the )?pc/.test(t)) return "pc";
-    if (/search on bing/.test(t) && !/mobile|手机|移动|edge/.test(t)) return "pc";
-    if (/daily set|每日任务|今日任务|daily check|每日活动|daily activities/.test(t)) return "daily";
-    return "";
+    const t = String(text || "").toLowerCase().replace(/\s+/g, " ");
+    const edge = /search on microsoft edge|search using microsoft edge|microsoft edge bonus|edge bonus|edge 奖励|通过\s*microsoft\s*edge|在\s*microsoft\s*edge|使用\s*microsoft\s*edge|edge 上搜索/.test(t);
+    const mobile = /mobile search|移动(?:设备)?搜索|手机搜索|via mobile|bing mobile|search on mobile|在移动设备上搜索|在手机上搜索|移动端搜索/.test(t);
+    const pc = /pc search|desktop search|computer search|电脑搜索|电脑上搜索|在电脑上搜索|search on (?:the )?pc/.test(t)
+      || (/search on bing/.test(t) && !mobile && !edge);
+    const daily = /daily set|每日任务|今日任务|daily check|每日活动|daily activities/.test(t);
+    const hits = [];
+    if (edge) hits.push("edge");
+    if (mobile) hits.push("mobile");
+    if (pc) hits.push("pc");
+    if (daily) hits.push("daily");
+    return hits.length === 1 ? hits[0] : "";
   }
 
   function normalizeQuotaPair(current, total, kind) {
@@ -880,24 +885,57 @@ const BingAssistant = (() => {
     };
   }
 
+  function normalizeQuotaRemaining(remaining, kind) {
+    const value = Number(remaining);
+    if (!Number.isFinite(value) || value < 0 || value > 240) return null;
+    if ((kind === "pc" || kind === "mobile") && value >= 45 && value <= 180 && value % 3 === 0) {
+      return { current: null, total: null, remaining: value / 3 };
+    }
+    return { current: null, total: null, remaining: value };
+  }
+
   function parseQuotaFraction(text, kind) {
     const raw = String(text || "").replace(/,/g, "");
     let match = raw.match(/(\d+)\s*(?:\/|of|／|out of)\s*(\d+)/i);
     if (match) return normalizeQuotaPair(match[1], match[2], kind);
     match = raw.match(/(\d+)\s*(?:points?|分)\s*(?:of|\/|共|out of)\s*(\d+)/i);
     if (match) return normalizeQuotaPair(match[1], match[2], kind);
+    match = raw.match(/还剩\s*(\d+)\s*(?:\/|of|／|共)\s*(\d+)/i);
+    if (match) return normalizeQuotaPair(match[1], match[2], kind);
     return null;
+  }
+
+  function parseQuotaRemaining(text, kind) {
+    const raw = String(text || "").replace(/,/g, "");
+    let match = raw.match(/(?:还剩|剩余|points?\s*remaining|remaining)\s*[:：]?\s*(\d+)/i);
+    if (match) return normalizeQuotaRemaining(match[1], kind);
+    match = raw.match(/(\d+)\s*(?:points?\s*)?remaining\b/i);
+    if (match) return normalizeQuotaRemaining(match[1], kind);
+    match = raw.match(/(\d+)\s*(?:left|left to go)\b/i);
+    if (match) return normalizeQuotaRemaining(match[1], kind);
+    return null;
+  }
+
+  function parseQuotaValue(text, kind) {
+    return parseQuotaFraction(text, kind) || parseQuotaRemaining(text, kind);
   }
 
   function collectQuotaChunks(cardTexts) {
     const chunks = [];
+    const push = (value) => {
+      const trimmed = String(value || "").replace(/[ \t\u00a0]+/g, " ").trim();
+      if (trimmed) chunks.push(trimmed);
+    };
+    const splitLabels = /(?=\b(?:pc search|desktop search|computer search|mobile search|daily set|daily activities|search on microsoft edge|microsoft edge bonus|edge bonus)|(?:电脑搜索|电脑上搜索|在电脑上搜索|移动设备搜索|移动搜索|手机搜索|每日任务|今日任务|每日活动|edge 奖励|通过\s*microsoft\s*edge))/i;
     (Array.isArray(cardTexts) ? cardTexts : [cardTexts]).forEach((text) => {
       String(text || "").split(/[\n\r]+/).forEach((line) => {
-        const trimmed = line.replace(/\s+/g, " ").trim();
-        if (trimmed) chunks.push(trimmed);
+        line.split(splitLabels).forEach(push);
       });
       const compact = String(text || "").replace(/\s+/g, " ").trim();
-      if (compact) chunks.push(compact);
+      if (compact) {
+        compact.split(splitLabels).forEach(push);
+        push(compact);
+      }
     });
     return chunks;
   }
@@ -911,24 +949,25 @@ const BingAssistant = (() => {
     };
     chunks.forEach((chunk) => {
       const kind = classifyQuotaKind(chunk);
-      assign(kind, parseQuotaFraction(chunk, kind));
+      assign(kind, parseQuotaValue(chunk, kind));
     });
     for (let i = 0; i < chunks.length; i++) {
       const kind = classifyQuotaKind(chunks[i]);
       if (!kind || result[kind]) continue;
-      assign(kind, parseQuotaFraction(chunks[i + 1] || "", kind) || parseQuotaFraction(chunks[i + 2] || "", kind));
+      assign(kind, parseQuotaValue(chunks[i + 1] || "", kind) || parseQuotaValue(chunks[i + 2] || "", kind));
     }
     const blob = chunks.join(" \n ");
-    const labeled = [
-      ["mobile", /(?:mobile search|移动(?:设备)?搜索|手机搜索|在移动设备上搜索|在手机上搜索)[^\d]{0,48}(\d+)\s*(?:\/|of|／|out of)\s*(\d+)/i],
-      ["pc", /(?:pc search|desktop search|computer search|电脑搜索|在电脑上搜索|电脑上搜索)[^\d]{0,48}(\d+)\s*(?:\/|of|／|out of)\s*(\d+)/i],
-      ["daily", /(?:daily set|每日任务|今日任务|每日活动|daily activities)[^\d]{0,48}(\d+)\s*(?:\/|of|／|out of)\s*(\d+)/i],
-      ["edge", /(?:microsoft edge|edge bonus|edge 奖励|通过\s*microsoft\s*edge)[^\d]{0,48}(\d+)\s*(?:\/|of|／|out of)\s*(\d+)/i]
+    const labels = [
+      ["mobile", /mobile search|移动(?:设备)?搜索|手机搜索|在移动设备上搜索|在手机上搜索|via mobile|search on mobile/i],
+      ["pc", /pc search|desktop search|computer search|电脑搜索|在电脑上搜索|电脑上搜索|search on (?:the )?pc/i],
+      ["daily", /daily set|每日任务|今日任务|每日活动|daily activities/i],
+      ["edge", /search on microsoft edge|microsoft edge bonus|edge bonus|edge 奖励|通过\s*microsoft\s*edge|search using microsoft edge/i]
     ];
-    labeled.forEach(([kind, re]) => {
+    labels.forEach(([kind, re]) => {
       if (result[kind]) return;
       const match = re.exec(blob);
-      if (match) assign(kind, normalizeQuotaPair(match[1], match[2], kind));
+      if (!match) return;
+      assign(kind, parseQuotaValue(blob.slice(match.index, match.index + 96), kind));
     });
     return result;
   }
@@ -1011,11 +1050,27 @@ const BingAssistant = (() => {
 
   function formatEdgeHint(quota) {
     if (!quota || !quota.edge || quota.edge.remaining == null || quota.edge.remaining <= 0) return "";
-    return `页面还显示 Edge 奖励剩余 ${quota.edge.remaining}`;
+    return `页面还显示 Edge 奖励剩余 ${quota.edge.remaining}。请用 Microsoft Edge 自己完成`;
+  }
+
+  function formatEdgeQuotaLine(quota) {
+    if (!quota || !quota.edge || quota.edge.remaining == null) return "还没读到";
+    if (quota.edge.remaining <= 0) return "页面显示今日已满";
+    return formatEdgeHint(quota);
   }
 
   function formatQuotaHint(quota, store, now = new Date()) {
     return [formatPcQuotaHint(quota), formatMobileHint(quota, store, now), formatEdgeHint(quota)].filter(Boolean).join("。");
+  }
+
+  function formatCompleteQuotaHint(quota, store, now = new Date()) {
+    const bits = [];
+    if (quota && quota.pc && quota.pc.remaining > 0) bits.push(formatPcQuotaHint(quota));
+    const mobile = formatMobileHint(quota, store, now);
+    if (mobile) bits.push(mobile);
+    const edge = formatEdgeHint(quota);
+    if (edge) bits.push(edge);
+    return bits.filter(Boolean).join("。");
   }
 
   function buildSearchUrl(keyword, extra = {}) {
@@ -1529,6 +1584,9 @@ const BingAssistant = (() => {
       pcQuotaHint: formatPcQuotaHint(quota),
       mobileHint: formatMobileHint(quota, store, now),
       mobileQuotaLine: formatMobileQuotaLine(quota, store, now),
+      edgeHint: formatEdgeHint(quota),
+      edgeQuotaLine: formatEdgeQuotaLine(quota),
+      completeQuotaHint: formatCompleteQuotaHint(quota, store, now),
       mobilePending,
       mobileDoneToday: isMobileDoneToday(store, now),
       searchPhase,
@@ -1734,7 +1792,9 @@ const BingAssistant = (() => {
     formatMobileHint,
     formatMobileQuotaLine,
     formatEdgeHint,
+    formatEdgeQuotaLine,
     formatQuotaHint,
+    formatCompleteQuotaHint,
     parseQuizQuestionTotal,
     formatQuizNextStep,
     formatQuizAssistFallback,
