@@ -4,7 +4,7 @@
 
 对外名称：Bing 积分助手（Bing Rewards Assistant）
 
-当前版本：2.8.0
+当前版本：2.9.0
 
 商店：[在 Edge 加载项中获取](https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj)
 
@@ -82,6 +82,14 @@
 详见 [PRIVACY.md](PRIVACY.md)。设置、词库和进度都只存在本机，不会上传。
 
 ## 更新日志
+
+### 2.9.0 - 2026-09-07
+
+长期维护版。搜索间隔更自然一点，界面里也不再藏着热榜时代的零件。
+
+- 搜索间隔仍是 8 秒起，每次不会完全一样
+- 收掉已经不用的词库下拉和重复词包；换一批、拉黑、周末词库都还在
+- 默认仍是安全模式，只做电脑搜索；权限与已上架包一致
 
 ### 2.8.0 - 2026-09-07
 
