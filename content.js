@@ -639,9 +639,9 @@ const jumpFailCountKey = `${prefix}JumpFailCount`; // 搜索页：连续跳转�
 const jumpLastPointsKey = `${prefix}JumpLastPoints`; // 搜索页：上次跳转时的积分
 const rewardsClickTimeKey = `${prefix}RewardsClickTime`; // 任务点击时间戳
 
-const selectedChannelKey = `${prefix}SelectedChannel`; // 当前选中的榜单
+const selectedChannelKey = `${prefix}SelectedChannel`; // 当前选中的词库
 const currentKeywordIndexKey = `${prefix}CurrentKeywordIndex`; // 当前搜索到第几个词
-const channelListKey = `${prefix}Channels`; // 榜单列表缓存
+const channelListKey = `${prefix}Channels`; // 词库列表缓存
 const widgetPosKey = `${prefix}WidgetPosition`; // 悬浮窗位置
 const widgetStateKey = `${prefix}WidgetState`; // 悬浮窗折叠状态
 // ==========================================
@@ -686,7 +686,7 @@ const SHORT_KEYWORD_POOL = [
     "智能家居","机械键盘","相机镜头","二手车","自驾游","心理学","地理知识"
 ];
 
-// 基于日期+频道名的伪随机数生成器（确保每天、每个榜单生成不同的排列）
+// 基于日期和词库名生成伪随机数，让每天的搜索词顺序不同
 function dailyRandomSeed(channelName) {
     let dateStr = getLocalDateStr() + "|" + (channelName || "");
     let hash = 0;
@@ -710,7 +710,7 @@ function seededShuffle(arr, seed) {
     return shuffled;
 }
 
-// 生成每日关键词列表（每天、每个榜单顺序不同）
+// 生成每日关键词列表
 function getKeywordPool(packName) {
     return packName === BingAssistant.WORD_PACK_LONG ? LOCAL_KEYWORD_POOL : SHORT_KEYWORD_POOL;
 }
@@ -868,8 +868,7 @@ function stopAutoSearch(msg, reason, reasonCode, extra) {
     }).catch(() => {});
 }
 
-// 【关键逻辑】每天随机切换榜单并清理旧缓存
-// 确保每天第一次运行时，或者挂机跨天时，自动换一个新榜单并获取最新数据
+// 跨天时重新生成今日词库
 function checkAndRandomizeDailyChannel(channelList) {
     if (!channelList || channelList.length === 0) return;
     const todayStr = getLocalDateStr();
@@ -883,7 +882,7 @@ function checkAndRandomizeDailyChannel(channelList) {
     }
 }
 
-// 切换到下一个榜单（关键词用完时循环）
+// 这批搜索词用完后换一批
 function switchToNextChannel() {
     showUserMessage("这批搜索词用完了，正在换一批", { action: "这批搜索词用完了，正在换一批" });
     setVal(BingAssistant.KEYS.keywordShuffle, Number(getVal(BingAssistant.KEYS.keywordShuffle, 0)) + 1);
@@ -2224,7 +2223,7 @@ async function doAutoSearch() {
   }
 }
 
-// 初始化榜单下拉框
+// 初始化词库下拉框
 function initChannels(channels, selectedChannel) {
   $("#ext-channels").empty();
   channels?.forEach(function (element) {

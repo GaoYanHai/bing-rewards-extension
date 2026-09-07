@@ -18,7 +18,7 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "2.7.0";
+  const PRODUCT_VERSION = "2.8.0";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -27,6 +27,9 @@ const BingAssistant = (() => {
   const WORD_PACK_SHORT = "日常短词";
   const WORD_PACK_LONG = "生活长尾";
   const WORD_PACK_CUSTOM = "自定义";
+  const WORD_PACK_WEEKEND = "周末生活词";
+  const WEEKEND_WORD_PACK_SAME = "same";
+  const WEEKEND_WORD_PACK_LIFE = "weekend_life";
   const LEGACY_CHANNELS = ["微博", "知乎", "百度", "抖音", "今日头条", "哔哩哔哩", "网易新闻", "腾讯新闻", "新浪新闻", "IT之家"];
   const KEYWORD_NOTE = "今日词库已生成 · 基于本地词包 · 未使用热榜";
 
@@ -176,6 +179,7 @@ const BingAssistant = (() => {
     dayRecords: "Rebang_DayRecords",
     weekendGoal: "Rebang_WeekendGoal",
     weekendSearchLimit: "Rebang_WeekendSearchLimit",
+    weekendWordPack: "Rebang_WeekendWordPack",
     missedRemindEnabled: "Rebang_MissedRemindEnabled",
     missedReminded: "Rebang_MissedReminded",
     catchUpDismissed: "Rebang_CatchUpDismissed",
@@ -215,6 +219,19 @@ const BingAssistant = (() => {
     "理财入门知识", "基金投资技巧", "股票分析方法", "保险选购指南", "储蓄理财方法",
     "家常菜做法", "烘焙入门教程", "地方特色小吃", "健康饮食搭配", "咖啡文化介绍",
     "宇宙探索发现", "深海生物奥秘", "恐龙化石研究", "气候变化影响", "新能源技术"
+  ];
+
+  const WEEKEND_KEYWORD_POOL = [
+    "周末去哪", "附近吃饭", "电影票", "公园散步", "家常菜",
+    "附近美食", "咖啡馆", "早午餐", "电影院排片", "博物馆预约",
+    "亲子活动", "公园门票", "周末天气", "短途自驾", "夜市小吃",
+    "烘焙蛋糕", "野餐食物", "动物园门票", "植物园", "温泉酒店",
+    "民宿推荐", "海边天气", "爬山路线", "骑行路线", "市集时间",
+    "烧烤店", "露营地点", "图书馆开放", "游泳馆", "羽毛球馆",
+    "周末电影", "家居收纳", "旧物改造", "社区活动", "菜市场",
+    "面包店", "甜品店", "火锅店", "周末穿搭", "鲜花店",
+    "郊游路线", "周末好去处", "亲子餐厅", "超市促销", "手工课",
+    "瑜伽课程", "公园停车", "二手市场", "周末加班餐", "家庭聚餐"
   ];
 
   function localDateString(date = new Date()) {
@@ -320,6 +337,17 @@ const BingAssistant = (() => {
     const goal = normalizeWeekendGoal(value);
     if (goal === WEEKEND_GOAL_SAME) return "与工作日相同";
     return goalLabel(goal);
+  }
+
+  function normalizeWeekendWordPack(value) {
+    return value === WEEKEND_WORD_PACK_LIFE ? WEEKEND_WORD_PACK_LIFE : WEEKEND_WORD_PACK_SAME;
+  }
+
+  function usesWeekendLifePack(store, now = new Date()) {
+    if (!isWeekend(now)) return false;
+    if (normalizeWeekendWordPack(store && store[KEYS.weekendWordPack]) !== WEEKEND_WORD_PACK_LIFE) return false;
+    if (normalizeWordPack(store && store[KEYS.selectedChannel]) === WORD_PACK_CUSTOM) return false;
+    return true;
   }
 
   function effectiveGoal(store, now = new Date()) {
@@ -550,10 +578,10 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "2.7 登录变了会停下来",
+      title: "2.8 周末可以用另一套词",
       points: [
-        "运行中掉登录，或积分突然对不上时会停，并提示去确认微软账号",
-        "电脑搜索做完后，能读到的移动 / Edge / 每日活动剩余会各提一句；没有数据不编",
+        "周末可选用更生活化的搜索词；默认仍与工作日相同，自定义词库不会被覆盖",
+        "测验少见题型仍按点不到的页面补选择器；同一题 6 次会退回你自己点",
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
@@ -703,6 +731,7 @@ const BingAssistant = (() => {
 
   function getKeywordPool(packName, customText) {
     if (packName === WORD_PACK_CUSTOM) return parseKeywordText(customText);
+    if (packName === WORD_PACK_WEEKEND) return WEEKEND_KEYWORD_POOL.slice();
     if (packName === WORD_PACK_LONG) return LONG_KEYWORD_POOL.slice();
     return SHORT_KEYWORD_POOL.slice();
   }
@@ -710,7 +739,7 @@ const BingAssistant = (() => {
   function buildKeywordPlan(store, count, now = new Date()) {
     const requestedPack = normalizeWordPack(store[KEYS.selectedChannel]);
     const blocked = new Set(normalizeStringList(store[KEYS.blockedKeywords]));
-    let pack = requestedPack;
+    let pack = usesWeekendLifePack(store, now) ? WORD_PACK_WEEKEND : requestedPack;
     let pool = getKeywordPool(pack, store[KEYS.customKeywords]).filter((word) => !blocked.has(word));
     if (!pool.length) {
       pack = WORD_PACK_SHORT;
@@ -744,7 +773,7 @@ const BingAssistant = (() => {
       requestedPack,
       words: result.map((item) => item.title),
       items: result,
-      note: KEYWORD_NOTE,
+      note: pack === WORD_PACK_WEEKEND ? "今日词库已生成 · 周末生活词 · 未使用热榜" : KEYWORD_NOTE,
       fallback: requestedPack === WORD_PACK_CUSTOM && pack !== WORD_PACK_CUSTOM
     };
   }
@@ -1391,6 +1420,7 @@ const BingAssistant = (() => {
     KEYS.weekendGoal,
     KEYS.limitSearchCount,
     KEYS.weekendSearchLimit,
+    KEYS.weekendWordPack,
     KEYS.missedRemindEnabled,
     KEYS.notifyEnabled,
     KEYS.selectedChannel,
@@ -1465,6 +1495,9 @@ const BingAssistant = (() => {
     }
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.weekendGoal)) {
       patch[KEYS.weekendGoal] = normalizeWeekendGoal(patch[KEYS.weekendGoal]);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.weekendWordPack)) {
+      patch[KEYS.weekendWordPack] = normalizeWeekendWordPack(patch[KEYS.weekendWordPack]);
     }
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.repeatRule)) {
       patch[KEYS.repeatRule] = normalizeRepeatRule(patch[KEYS.repeatRule]);
@@ -1609,6 +1642,7 @@ const BingAssistant = (() => {
       weekendGoal: normalizeWeekendGoal(store[KEYS.weekendGoal]),
       weekendGoalLabel: weekendGoalLabel(store[KEYS.weekendGoal]),
       weekendSearchLimit: Number(store[KEYS.weekendSearchLimit]) > 0 ? Math.round(Number(store[KEYS.weekendSearchLimit])) : "",
+      weekendWordPack: normalizeWeekendWordPack(store[KEYS.weekendWordPack]),
       dailyEnabled,
       dailyDone,
       dailySummary,
@@ -1720,10 +1754,13 @@ const BingAssistant = (() => {
     DAY_RECORD_SHOW_DAYS,
     DAY_CHART_DAYS,
     WEEKEND_GOAL_SAME,
+    WEEKEND_WORD_PACK_SAME,
+    WEEKEND_WORD_PACK_LIFE,
     WEEKDAY_NAMES,
     WORD_PACK_SHORT,
     WORD_PACK_LONG,
     WORD_PACK_CUSTOM,
+    WORD_PACK_WEEKEND,
     LEGACY_CHANNELS,
     KEYWORD_NOTE,
     GOALS,
@@ -1739,6 +1776,7 @@ const BingAssistant = (() => {
     KEYS,
     SHORT_KEYWORD_POOL,
     LONG_KEYWORD_POOL,
+    WEEKEND_KEYWORD_POOL,
     localDateString,
     dailyCountKey,
     dailyMobileCountKey,
@@ -1759,6 +1797,8 @@ const BingAssistant = (() => {
     shiftLocalDate,
     normalizeWeekendGoal,
     weekendGoalLabel,
+    normalizeWeekendWordPack,
+    usesWeekendLifePack,
     effectiveGoal,
     effectiveSearchLimit,
     readDayRecords,
