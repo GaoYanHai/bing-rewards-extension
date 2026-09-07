@@ -48,7 +48,7 @@ function GM_getValue(key, defaultValue) {
 function GM_setValue(key, value) {
     rebangExtensionStore[key] = value;
     chrome.storage.local.set({ [key]: value }).catch((error) => {
-        console.error(`[Rebang] 保存设置失败: ${key}`, error);
+        console.error(`保存设置失败: ${key}`, error);
     });
 }
 
@@ -59,7 +59,6 @@ function GM_addStyle(cssText) {
     return style;
 }
 
-const TEST_MODE = 0;
 // 跨天检测用：从持久存储读取上次检查日期，首次运行时初始化为今天
 const SCRIPT_LOAD_DATE = GM_getValue("Rebang_LastCheckDate", getLocalDateStr());
 
@@ -537,7 +536,7 @@ document.addEventListener("input", (event) => {
 const prefix = "Rebang_";
 const autoSearchLockKey = `${prefix}AutoSearchLock`; // 搜索开关锁
 const enableDailyTasksKey = `${prefix}EnableDailyTasks`; // 是否启用每日任务
-const maxNoGainLimitKey = `${prefix}MaxNoGainLimit`; // 连续无积分熔断阈值
+const maxNoGainLimitKey = `${prefix}MaxNoGainLimit`; // 连续没有加分时停止的次数
 const dailyTaskMaxRetriesKey = `${prefix}DailyTaskMaxRetries`; // 任务重试次数
 const autoSearchLockExpiresKey = `${prefix}AutoSearchLockExpires`; // 搜索冷却时间
 const consecutiveNoGainKey = `${prefix}ConsecutiveNoGainCount`; // 连续无积分计数
@@ -549,12 +548,12 @@ const limitSearchCountKey = `${prefix}LimitSearchCount`; // 每日搜索限制
 // ==========================================
 // 多标签页互斥与协同逻辑常量
 // ==========================================
-const globalLockKey = `${prefix}GlobalLastRunTime`;   // 全局最后一次执行时间（所有标签页共享）
-const globalMasterTabKey = `${prefix}GlobalMasterTabId`; // 当前主控标签页的ID
-const globalMasterStatusKey = `${prefix}GlobalMasterStatus`; //主控运行状态标识: "RUNNING" 或 "IDLE"
+const globalLockKey = `${prefix}GlobalLastRunTime`;   // 所有搜索页共享的最后一次执行时间
+const globalMasterTabKey = `${prefix}GlobalMasterTabId`; // 当前负责搜索的标签页
+const globalMasterStatusKey = `${prefix}GlobalMasterStatus`; // 当前搜索页运行状态: "RUNNING" 或 "IDLE"
 // ==========================================
 // 使用 sessionStorage 固定当前标签页 ID
-// 这样即使搜索刷新页面，ID也不会变，主控权牢牢锁定在当前标签页
+// 搜索刷新后仍认作同一页，避免几个搜索页一起跑
 // ==========================================
 let currentTabId = sessionStorage.getItem("Rebang_TabId");
 if (!currentTabId) {
@@ -576,12 +575,12 @@ function syncTabStatus() {
     // 当前页面的搜索开关状态 ("on" 为正在跑, "off" 为停止/闲置)
     let mySwitchState = getVal(autoSearchLockKey, "off");
 
-    // 判定主控是否"死掉" (超过15秒没更新心跳)
+    // 判定当前搜索页是否已经超过 15 秒没有动静
     let isMasterDead = (now - lastRun > 15000);
 
     let isMaster = false;
 
-    // --- 场景 1: 我就是主控 ---
+    // --- 场景 1: 我就是当前搜索页 ---
     if (masterId === currentTabId) {
         isMaster = true;
         // 更新心跳
@@ -591,18 +590,17 @@ function syncTabStatus() {
         if (mySwitchState === "on") {
             setVal(globalMasterStatusKey, "RUNNING");
         } else {
-            // 我虽然是主控，但我没事做（搜完了或被手动停了），标记为 IDLE
+            // 我虽然是当前搜索页，但已经搜完或被手动停了，标记为 IDLE
             setVal(globalMasterStatusKey, "IDLE");
         }
     }
-    // --- 场景 2: 别人是主控 ---
+    // --- 场景 2: 别的搜索页正在跑 ---
     else {
-        // 核心抢夺逻辑：
-        // 1. 主控死掉了 (isMasterDead) -> 抢
-        // 2. 主控还活着，但是它处于闲置状态 (Status == IDLE) -> 抢
+        // 1. 当前搜索页已经没动静 (isMasterDead) -> 由这一页接着做
+        // 2. 当前搜索页还在，但处于闲置 (Status == IDLE) -> 由这一页接着做
         if (masterId === "" || isMasterDead || masterStatus === "IDLE") {
 
-            // 抢夺主控权
+            // 改由这一页负责搜索
             setVal(globalMasterTabKey, currentTabId);
             setVal(globalLockKey, now);
             setVal(globalMasterStatusKey, mySwitchState === "on" ? "RUNNING" : "IDLE");
@@ -612,7 +610,7 @@ function syncTabStatus() {
 
             isMaster = true;
         } else {
-            // 主控正在 RUNNING 且没死，我老实待机
+            // 当前搜索页正在 RUNNING 且没超时，这一页待机
             isMaster = false;
         }
     }
@@ -848,6 +846,7 @@ function getBingPoints() {
 }
 
 function stopAutoSearch(msg, reason, reasonCode, extra) {
+    extra = extra || {};
     setVal(autoSearchLockKey, "off");
     setVal(BingAssistant.KEYS.waitingUserTask, null);
     $("#ext-autosearch-lock").text("开始").removeClass("stop");
@@ -859,7 +858,9 @@ function stopAutoSearch(msg, reason, reasonCode, extra) {
         type: "RUN_FINISHED",
         reason: reason || "stopped",
         reasonCode: reasonCode || "",
-        where: extra && extra.where,
+        where: extra.where,
+        duringRun: extra.duringRun === true,
+        accountChanged: extra.accountChanged === true,
         message: msg || "",
         count: Number(getVal(getAutoSearchCountKey(), 0)),
         limit: todaySearchLimit(),
@@ -920,9 +921,10 @@ function getCurrentChannel() {
 function detectLoginState() {
   const points = getBingPoints();
   if (points !== null) return "in";
-  const name = ($("#id_n").text() || "").trim();
-  if (name) return "in";
-  const signIn = $("#id_s, #id_l, a[href*='login.live.com'], a[href*='signin']").filter(function() {
+  const name = ($("#id_n, #id_n_f, .id_username, .b_idName").first().text() || "").trim();
+  if (name && name !== "..." && !/^(登录|sign in)$/i.test(name)) return "in";
+  const signIn = $("#id_s, #id_l, a[href*='login.live.com'], a[href*='signin'], a[href*='login.microsoftonline.com'], button[aria-label*='Sign in'], button[aria-label*='登录']").filter(function() {
+    if (typeof isVisibleElement === "function" && !isVisibleElement(this)) return false;
     const label = (($(this).text() || "") + " " + ($(this).attr("aria-label") || "")).trim();
     return /登录|sign in/i.test(label) || this.id === "id_s";
   });
@@ -932,9 +934,43 @@ function detectLoginState() {
   return "unknown";
 }
 
-function stopForLogin(duringRun) {
-  const copy = BingAssistant.failCopy(BingAssistant.FAIL_CODES.LOGIN, { duringRun: !!duringRun });
-  stopAutoSearch(copy.message, "failed", BingAssistant.FAIL_CODES.LOGIN);
+function hadLoginBefore() {
+  if (getVal(BingAssistant.KEYS.loginState, "unknown") === "in") return true;
+  if (BingAssistant.readablePoints(getVal(BingAssistant.KEYS.pointsBalance, null)) !== null) return true;
+  if (getVal(lastPointsKey, null) !== null) return true;
+  return false;
+}
+
+function previousPointsForAccountCheck() {
+  const last = BingAssistant.readablePoints(getVal(lastPointsKey, null));
+  if (last !== null) return last;
+  const start = BingAssistant.readablePoints(getVal(BingAssistant.KEYS.runStartPoints, null));
+  if (start !== null) return start;
+  return BingAssistant.readablePoints(getVal(BingAssistant.KEYS.pointsBalance, null));
+}
+
+function stopForLogin(duringRun, extra) {
+  const payload = Object.assign({ duringRun: !!duringRun }, extra || {});
+  const code = payload.accountChanged ? BingAssistant.FAIL_CODES.ACCOUNT_CHANGED : BingAssistant.FAIL_CODES.LOGIN;
+  const copy = BingAssistant.failCopy(code, payload);
+  stopAutoSearch(copy.message, "failed", code, payload);
+}
+
+function stopIfLoginOrAccountChanged(login, currentPoints, extra) {
+  extra = extra || {};
+  if (BingAssistant.loginLooksLost(login, {
+    wasLoggedIn: hadLoginBefore(),
+    points: currentPoints,
+    giveUp: !!extra.giveUp
+  })) {
+    stopForLogin(true);
+    return true;
+  }
+  if (currentPoints !== null && BingAssistant.pointsLookLikeAccountChanged(previousPointsForAccountCheck(), currentPoints)) {
+    stopForLogin(true, { accountChanged: true });
+    return true;
+  }
+  return false;
 }
 
 function stopForReason(code, extra) {
@@ -1174,6 +1210,7 @@ function addTaskToBlacklist(url) {
 let pointsMissCount = 0;
 let searchBoxMissCount = 0;
 let rewardsCardMissCount = 0;
+let rewardsLoginMissCount = 0;
 
 function goToRewardsPage(nowTime, currentPoints) {
     let lastRedirect = Number(getVal(getDailyTaskRedirectTimeKey(), 0));
@@ -1647,6 +1684,7 @@ function scheduleQuizAutoSolve(waiting) {
 async function handleRewardsPage() {
     let isLocked = getVal(autoSearchLockKey, "off");
     let currentPoints = getBingPoints();
+    if (isLocked === "on" && stopIfLoginOrAccountChanged(detectLoginState(), currentPoints)) return;
     if (currentPoints !== null) {
         $("#ext-rewards-points").text(currentPoints);
         setVal(lastPointsKey, currentPoints);
@@ -1687,10 +1725,13 @@ async function handleRewardsPage() {
     }
 
     const login = detectLoginState();
-    if (login === "out") {
-        stopForLogin(true);
-        return;
-    }
+    const dashboardReady = !!(cards.length || $(BingAssistant.TASK_SELECTORS.dashboard).length);
+    if (login === "in" || currentPoints !== null) rewardsLoginMissCount = 0;
+    else if (dashboardReady && document.readyState === "complete") rewardsLoginMissCount += 1;
+    else rewardsLoginMissCount = 0;
+    if (stopIfLoginOrAccountChanged(login, currentPoints, {
+        giveUp: dashboardReady && document.readyState === "complete" && rewardsLoginMissCount >= 8
+    })) return;
     if (!navigator.onLine) {
         stopForReason(BingAssistant.FAIL_CODES.NETWORK);
         return;
@@ -1937,18 +1978,13 @@ async function handleRewardsPage() {
 
 async function doAutoSearch() {
   if (searchInFlight) return;
-  // --- 多标签页互斥检查 (要求1 & 4) ---
-  // 每次执行搜索前，先同步状态。如果不是主控页，且有其他页面刚跑过，则跳过本次执行。
+  // 每次执行搜索前，先同步状态。如果不是当前负责的搜索页，就不要动手。
   let isMaster = syncTabStatus();
   let lastGlobalRun = Number(getVal(globalLockKey, 0));
   let nowTime = Date.now();
   const relayRetryKey = `${prefix}RelayRetryCount`; // 换页重试计数
 
-  // 【核心修复逻辑】
-  // 原代码是: if (!isMaster && (nowTime - lastGlobalRun < 8000)) { ... }
-  // 这意味着如果主控休息了9秒（但他还在正常等待中），副页面就会抢走执行权。
-  // 修改后：只要 isMaster 为 false，说明 syncTabStatus 认为主控还活着（没超过20秒），
-  // 那么我就绝对不动，老老实实待机，实现"固定主控"。
+  // 只要这一页不是当前搜索页，说明别的搜索页还在跑，这里待机。
   if (!isMaster) {
       return;
   }
@@ -1979,8 +2015,7 @@ async function doAutoSearch() {
       return;
   }
   const login = detectLoginState();
-  if (login === "out" && track.kind !== "mobile") {
-      stopForLogin(true);
+  if (track.kind !== "mobile" && stopIfLoginOrAccountChanged(login, getBingPoints())) {
       return;
   }
   const searchBox = findSearchBox();
@@ -2005,14 +2040,14 @@ async function doAutoSearch() {
               stopForReason(BingAssistant.FAIL_CODES.MOBILE_POINTS);
               return;
           }
-          if (login === "in") stopForReason(BingAssistant.FAIL_CODES.PAGE_CHANGED, { where: "search" });
-          else stopForLogin(true);
+          stopForLogin(true);
           return;
       }
       showUserMessage(track.kind === "mobile" ? "正在确认这次移动搜索的积分..." : "正在确认登录和积分...");
       return;
   }
   pointsMissCount = 0;
+  if (track.kind !== "mobile" && stopIfLoginOrAccountChanged(login, currentPoints)) return;
 
   const currentSearchCountNow = Number(getVal(track.countKey, 0));
   const limitSearchCountNow = track.limit;
@@ -2058,6 +2093,10 @@ async function doAutoSearch() {
   // 积分对比
   if (lastPoints !== null) {
       let lastP = Number(lastPoints);
+      if (track.kind !== "mobile" && BingAssistant.pointsLookLikeAccountChanged(lastP, currentPoints)) {
+          stopForLogin(true, { accountChanged: true });
+          return;
+      }
       if (currentPoints > lastP) {
           currentSearchCount++;
           setVal(track.countKey, currentSearchCount);
@@ -2343,7 +2382,6 @@ function checkAutoStart() {
     let currentDate = getLocalDateStr();
     let lastCheckDate = GM_getValue("Rebang_LastCheckDate", currentDate);
     if (currentDate !== lastCheckDate) {
-        console.log(`[Rebang] 日期变更 (${lastCheckDate} -> ${currentDate})，重算今日状态`);
         GM_setValue("Rebang_LastCheckDate", currentDate);
         try {
             sessionStorage.removeItem("Rebang_SessionClicked");
@@ -2384,7 +2422,6 @@ function checkAutoStart() {
         let limit = todaySearchLimit();
         let current = Number(getVal(getAutoSearchCountKey(), 0));
         if (getVal(autoSearchLockKey, "off") !== "on" && current < limit) {
-             console.log(`[Rebang] Auto-start triggered. Time: ${now.toLocaleTimeString()}`);
              setVal(triggeredKey, "true");
              $("#ext-autosearch-lock").click();
         } else if (current >= limit) {
@@ -2577,15 +2614,6 @@ function initSearchControls() {
       }
       stopAutoSearch("已停止", "stopped");
     } else {
-        if (TEST_MODE === 1) {
-            showUserMessage("测试模式：正在重置今天的状态");
-            setVal(getDailyTasksDoneKey(), false);
-            setVal(rewardsFailCountKey, 0);
-            setVal(getDailyTaskRedirectTimeKey(), 0);
-            setVal(jumpFailCountKey, 0);
-            setVal(getAutoSearchCountKey(), 0);
-        }
-
         let limit = todaySearchLimit();
         let current = Number(getVal(getAutoSearchCountKey(), 0));
         let dailyEnabled = dailyTasksWanted();
