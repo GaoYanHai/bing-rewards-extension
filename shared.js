@@ -18,7 +18,7 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "2.8.0";
+  const PRODUCT_VERSION = "2.9.0";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -578,10 +578,10 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "2.8 周末可以用另一套词",
+      title: "2.9 搜索间隔更自然一点",
       points: [
-        "周末可选用更生活化的搜索词；默认仍与工作日相同，自定义词库不会被覆盖",
-        "测验少见题型仍按点不到的页面补选择器；同一题 6 次会退回你自己点",
+        "搜索间隔仍是 8 秒起，每次不会完全一样",
+        "收掉已经不用的词库下拉；换一批、拉黑、周末词库都还在",
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
@@ -612,7 +612,10 @@ const BingAssistant = (() => {
     const range = normalizeIntervalRange(minValue, maxValue);
     const minMs = range.min * 1000;
     const maxMs = range.max * 1000;
-    return minMs + Math.floor(Math.random() * (maxMs - minMs + 1));
+    const span = maxMs - minMs;
+    if (span <= 0) return minMs;
+    const peaked = (Math.random() + Math.random()) / 2;
+    return minMs + Math.floor(peaked * (span + 1));
   }
 
   function isPaused(store) {
