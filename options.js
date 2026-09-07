@@ -12,6 +12,7 @@ const mobileQuota = document.getElementById("mobile-quota");
 const missedRemind = document.getElementById("missed-remind");
 const notifyEnabled = document.getElementById("notify-enabled");
 const wordPack = document.getElementById("word-pack");
+const weekendWordPack = document.getElementById("weekend-word-pack");
 const customKeywords = document.getElementById("custom-keywords");
 const keywordNote = document.getElementById("keyword-note");
 const todayWords = document.getElementById("today-words");
@@ -113,6 +114,7 @@ function fill(store) {
   if (titleEl) titleEl.textContent = copy.title;
   if (pointsEl) pointsEl.innerHTML = (copy.points || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
   wordPack.value = model.wordPack;
+  if (weekendWordPack) weekendWordPack.value = model.weekendWordPack || A.WEEKEND_WORD_PACK_SAME;
   customKeywords.value = model.customKeywords;
   noGainLimit.value = String(model.noGainLimit);
   dailyRetries.value = String(model.dailyRetries);
@@ -234,6 +236,12 @@ wordPack.addEventListener("change", async () => {
   await save({ [A.KEYS.selectedChannel]: wordPack.value });
   await send("REFRESH_KEYWORDS");
 });
+if (weekendWordPack) {
+  weekendWordPack.addEventListener("change", async () => {
+    await save({ [A.KEYS.weekendWordPack]: A.normalizeWeekendWordPack(weekendWordPack.value) });
+    await send("REFRESH_KEYWORDS");
+  });
+}
 noGainLimit.addEventListener("change", () => {
   const value = Math.max(3, Number(noGainLimit.value) || A.DEFAULT_NO_GAIN_LIMIT);
   noGainLimit.value = String(value);

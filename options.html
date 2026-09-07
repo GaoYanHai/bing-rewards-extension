@@ -54,7 +54,7 @@
           <option value="try_all">尽量全做</option>
         </select>
       </label>
-      <p class="help">只覆盖周末的目标和搜索次数。间隔、词库和补跑策略仍和工作日相同。</p>
+      <p class="help">只覆盖周末的目标和搜索次数。词库可在下面单独设置，默认仍与工作日相同。</p>
       <label class="row">
         <span>电脑搜索目标次数</span>
         <input type="number" id="search-limit" min="1" max="150" step="1">
@@ -107,6 +107,14 @@
           <option value="自定义">自定义</option>
         </select>
       </label>
+      <label class="row">
+        <span>周末词库</span>
+        <select id="weekend-word-pack">
+          <option value="same">与工作日相同</option>
+          <option value="weekend_life">周末生活词</option>
+        </select>
+      </label>
+      <p class="help">周末可以用更生活化的搜索词。默认仍与工作日相同。自定义词库不会被覆盖。</p>
       <label class="stack">
         <span>自定义词，每行一个，也可用逗号分隔</span>
         <textarea id="custom-keywords" rows="6" placeholder="天气预报&#10;今日新闻&#10;家常菜谱"></textarea>
@@ -232,10 +240,10 @@
 
     <section>
       <h2>这个版本</h2>
-      <p id="whats-new-title">2.7 登录变了会停下来</p>
+      <p id="whats-new-title">2.8 周末可以用另一套词</p>
       <ul id="whats-new-points">
-        <li>运行中掉登录，或积分突然对不上时会停，并提示去确认微软账号</li>
-        <li>电脑搜索做完后，能读到的移动 / Edge / 每日活动剩余会各提一句；没有数据不编</li>
+        <li>周末可选用更生活化的搜索词；默认仍与工作日相同，自定义词库不会被覆盖</li>
+        <li>测验少见题型仍按点不到的页面补选择器；同一题 6 次会退回你自己点</li>
         <li>默认仍是安全模式，只做电脑搜索；权限和产品名不变</li>
       </ul>
     </section>
