@@ -460,6 +460,7 @@ async function applyDefaultsIfNeeded() {
   if (store[KEYS.dayRecords] === undefined) patch[KEYS.dayRecords] = [];
   if (store[KEYS.weekendGoal] === undefined) patch[KEYS.weekendGoal] = A.WEEKEND_GOAL_SAME;
   if (store[KEYS.weekendSearchLimit] === undefined) patch[KEYS.weekendSearchLimit] = "";
+  if (store[KEYS.weekendWordPack] === undefined) patch[KEYS.weekendWordPack] = A.WEEKEND_WORD_PACK_SAME;
   if (store[KEYS.missedRemindEnabled] === undefined) patch[KEYS.missedRemindEnabled] = true;
   if (A.LEGACY_CHANNELS.includes(store[KEYS.selectedChannel])) {
     patch[KEYS.selectedChannel] = A.WORD_PACK_SHORT;

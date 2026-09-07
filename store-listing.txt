@@ -1,19 +1,20 @@
 # 商店已上架
 
 Edge 加载项：https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj
-2.5.0 已通过审核。2.7.0 作为商店更新上传，不要撤回 2.5.0，也不要重新提交新产品。
+2.5.0 已通过审核。2.8.0 作为商店更新上传，不要撤回 2.5.0，也不要重新提交新产品。
 权限表、产品名、隐私政策与下方已提交说明保持一致，不要两套说法。
 
-## 2.7.0 更新说明（给商店后台）
+## 2.8.0 更新说明（给商店后台）
 
+- 周末可选用更生活化的搜索词；默认仍与工作日相同，自定义词库不会被覆盖
 - 运行中掉登录，或积分突然对不上时会停下来，提示去确认微软账号
 - 电脑搜索做完后，能读到的移动 / Edge / 每日活动剩余会各提一句；读不到不编
 - 仍默认只做电脑搜索。移动搜索和测验作答仍是可选危险项，失败会停
 - 不改权限、不换产品名、不自动点 Edge 奖励
 
-# Edge Add-ons 提交用文案（2.7.0，权限说明与 2.5.0 一致）
+# Edge Add-ons 提交用文案（2.8.0，权限说明与 2.5.0 一致）
 
-安装包：bing-rewards-extension-2.7.0.zip
+安装包：bing-rewards-extension-2.8.0.zip
 提交页：https://partner.microsoft.com/dashboard/microsoftedge/overview
 隐私政策：https://github.com/GaoYanHai/bing-rewards-extension/blob/main/PRIVACY.md
 主页：https://github.com/GaoYanHai/bing-rewards-extension

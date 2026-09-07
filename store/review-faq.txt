@@ -1,6 +1,6 @@
 # Edge Add-ons 审核问答备忘（与 2.5.0 已提交说明一致）
 
-给审核员看的人话。2.7.0 功能更新，不改权限、不换产品名、不撤回 2.5.0 审核包。
+给审核员看的人话。2.8.0 功能更新，不改权限、不换产品名、不撤回 2.5.0 审核包。
 
 ## 单一用途
 
@@ -39,7 +39,7 @@ host 权限只有：https://*.bing.com/*
 - declarativeNetRequestWithHostAccess：仅在你打开危险设置里的移动搜索后，把指定标签页的请求改成手机样式；默认不改
 - https://*.bing.com/*：在 Bing 搜索页和 Rewards 页读取积分、任务和今日配额
 
-## 2.7 没有改的事
+## 2.8 没有改的事
 
 - 不改 permissions / host_permissions
 - 不加 Cookie / 无痕 / 第二套登录态
