@@ -644,77 +644,7 @@ const currentKeywordIndexKey = `${prefix}CurrentKeywordIndex`; // 当前搜索�
 const channelListKey = `${prefix}Channels`; // 词库列表缓存
 const widgetPosKey = `${prefix}WidgetPosition`; // 悬浮窗位置
 const widgetStateKey = `${prefix}WidgetState`; // 悬浮窗折叠状态
-// ==========================================
-// 本地关键词库（彻底摆脱外部 API 依赖）
-// ==========================================
-const LOCAL_KEYWORD_POOL = [
-    // 科技数码
-    "人工智能最新进展","ChatGPT使用技巧","智能手机推荐","笔记本电脑选购","平板电脑对比",
-    "5G网络覆盖","智能家居设备","相机选购指南","耳机推荐","机械键盘评测",
-    // 新闻时事
-    "今日国内新闻","国际热点事件","经济形势分析","股市行情走势","房产政策解读",
-    "教育改革最新","医疗健康新规","交通出行变化","天气预报查询","法律法规常识",
-    // 生活百科
-    "健康养生方法","美食菜谱推荐","旅游景点攻略","运动健身计划","减肥瘦身方法",
-    "护肤美容技巧","服装穿搭推荐","家居装修设计","二手车选购","宠物养护知识",
-    // 娱乐休闲
-    "热门电影推荐","电视剧排行榜","综艺节目排名","音乐排行榜","游戏攻略秘籍",
-    "小说推荐排行","动漫新番推荐","相声小品合集","综艺节目盘点","明星八卦新闻",
-    // 体育赛事
-    "足球比赛结果","NBA最新赛况","体育赛事直播","奥运会新闻","世界杯赛程",
-    "羽毛球比赛","乒乓球赛事","游泳锦标赛","田径世界纪录","电竞比赛结果",
-    // 学习教育
-    "编程入门教程","英语学习方法","数学解题技巧","历史知识普及","物理科普文章",
-    "化学实验视频","地理知识问答","文学名著赏析","哲学思想入门","心理学入门",
-    // 汽车出行
-    "新能源汽车推荐","汽车评测对比","二手车市场","驾照考试技巧","自驾游路线",
-    // 财经理财
-    "理财入门知识","基金投资技巧","股票分析方法","保险选购指南","储蓄理财方法",
-    // 美食
-    "家常菜做法","烘焙入门教程","地方特色小吃","健康饮食搭配","咖啡文化介绍",
-    // 自然科学
-    "宇宙探索发现","深海生物奥秘","恐龙化石研究","气候变化影响","新能源技术"
-];
-
-const SHORT_KEYWORD_POOL = [
-    "天气预报","今日新闻","翻译","地图","汇率查询","股票行情","快递查询","家常菜谱",
-    "电影票","火车票","今日油价","手机推荐","笔记本电脑","无线耳机","数码相机",
-    "健身计划","减肥方法","护肤步骤","穿搭灵感","旅游攻略","酒店预订","机票查询",
-    "世界杯","足球比分","NBA赛况","编程入门","英语单词","历史故事","物理科普",
-    "基金入门","保险知识","理财方法","咖啡做法","新能源汽车","驾照考试","宠物护理",
-    "小说推荐","音乐排行","手机游戏","动漫推荐","健康饮食","地方小吃","宇宙探索",
-    "智能家居","机械键盘","相机镜头","二手车","自驾游","心理学","地理知识"
-];
-
-// 基于日期和词库名生成伪随机数，让每天的搜索词顺序不同
-function dailyRandomSeed(channelName) {
-    let dateStr = getLocalDateStr() + "|" + (channelName || "");
-    let hash = 0;
-    for (let i = 0; i < dateStr.length; i++) {
-        hash = ((hash << 5) - hash) + dateStr.charCodeAt(i);
-        hash = hash & hash; // 转为32位整数
-    }
-    return Math.abs(hash);
-}
-
-function seededShuffle(arr, seed) {
-    let shuffled = arr.slice();
-    let m = shuffled.length;
-    let s = seed;
-    while (m > 0) {
-        s = (s * 1103515245 + 12345) & 0x7fffffff; // LCG 线性同余
-        let i = s % m;
-        m--;
-        [shuffled[m], shuffled[i]] = [shuffled[i], shuffled[m]];
-    }
-    return shuffled;
-}
-
-// 生成每日关键词列表
-function getKeywordPool(packName) {
-    return packName === BingAssistant.WORD_PACK_LONG ? LOCAL_KEYWORD_POOL : SHORT_KEYWORD_POOL;
-}
-
+// 今日词库走 shared.js 的 buildKeywordPlan
 function generateDailyKeywords(count, channelName) {
     const plan = BingAssistant.buildKeywordPlan({
         ...rebangExtensionStore,
@@ -869,8 +799,7 @@ function stopAutoSearch(msg, reason, reasonCode, extra) {
 }
 
 // 跨天时重新生成今日词库
-function checkAndRandomizeDailyChannel(channelList) {
-    if (!channelList || channelList.length === 0) return;
+function checkAndRandomizeDailyChannel() {
     const todayStr = getLocalDateStr();
     const lastSelectDate = localStorage.getItem(`${prefix}LastAutoSelectDate`);
     if (lastSelectDate !== todayStr) {
@@ -2223,14 +2152,7 @@ async function doAutoSearch() {
   }
 }
 
-// 初始化词库下拉框
-function initChannels(channels, selectedChannel) {
-  $("#ext-channels").empty();
-  channels?.forEach(function (element) {
-    var opt = new Option(element, element);
-    opt.selected = element == selectedChannel;
-    $("#ext-channels").append(opt);
-  });
+function ensureKeywordPack() {
   if (localStorage.getItem(selectedChannelKey) == null) {
     localStorage.setItem(selectedChannelKey, BingAssistant.WORD_PACK_SHORT);
   }
@@ -2394,10 +2316,7 @@ function checkAutoStart() {
         return;
     }
 
-    let channelList = sessionStorage.getItem(channelListKey);
-    if (channelList) {
-        checkAndRandomizeDailyChannel(JSON.parse(channelList));
-    }
+    checkAndRandomizeDailyChannel();
 
     let startHourStr = getVal(autoStartHourKey, "-1");
     let startMinStr = getVal(autoStartMinKey, "-1");
@@ -2533,7 +2452,6 @@ function initSearchControls() {
             </div>
             <div id="ext-recent-logs"></div>
             <input type="hidden" id="ext-autosearch-limit" value="${savedLimit}">
-            <select id="ext-channels" hidden></select>
             <select id="ext-keywords-linktype" hidden><option value="搜索" selected>搜索</option></select>
             <span id="ext-current-count" hidden>0</span>
             <span id="ext-current-keyword" hidden>-</span>
@@ -2547,24 +2465,8 @@ function initSearchControls() {
     restoreWidgetPosition();
     bindMiniBarToggle();
 
-    const DEFAULT_CHANNELS = [BingAssistant.WORD_PACK_SHORT, BingAssistant.WORD_PACK_LONG, BingAssistant.WORD_PACK_CUSTOM];
-    let channelList = sessionStorage.getItem(channelListKey);
-    let listArr = DEFAULT_CHANNELS;
-    if (channelList !== null) {
-        try {
-            const parsed = JSON.parse(channelList);
-            if (Array.isArray(parsed) && parsed.some((name) => BingAssistant.LEGACY_CHANNELS.includes(name))) {
-                listArr = DEFAULT_CHANNELS;
-            } else if (Array.isArray(parsed) && parsed.length) {
-                listArr = parsed;
-            }
-        } catch (error) {
-            listArr = DEFAULT_CHANNELS;
-        }
-    }
-    sessionStorage.setItem(channelListKey, JSON.stringify(listArr));
-    initChannels(listArr, getCurrentChannel());
-    checkAndRandomizeDailyChannel(listArr);
+    ensureKeywordPack();
+    checkAndRandomizeDailyChannel();
     renderRecentLogs();
   }
 
@@ -2582,11 +2484,6 @@ function initSearchControls() {
 
   if (currentSearchCount >= limitSearchCount) { setVal(autoSearchLockKey, "off"); }
 
-  $("#ext-channels").off("change.rebang").on("change.rebang", function () {
-      localStorage.setItem(selectedChannelKey, $(this).val());
-      localStorage.setItem(currentKeywordIndexKey, 0);
-      initKeywords();
-  });
   $("#ext-keywords-refresh").off("click.rebang").on("click.rebang", function () {
       setVal(BingAssistant.KEYS.keywordShuffle, Number(getVal(BingAssistant.KEYS.keywordShuffle, 0)) + 1);
       setVal(BingAssistant.KEYS.dailyKeywordPlan, null);
