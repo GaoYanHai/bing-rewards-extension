@@ -900,7 +900,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const copy = A.failCopy(reasonCode, {
         limit: A.readNumber(store, KEYS.maxNoGainLimit, A.DEFAULT_NO_GAIN_LIMIT),
         message: message.message || "",
-        duringRun: reasonCode === A.FAIL_CODES.LOGIN,
+        duringRun: message.duringRun === true || message.accountChanged === true,
+        accountChanged: message.accountChanged === true,
         where: message.where
       });
       const summary = A.buildTodaySummary(store, {

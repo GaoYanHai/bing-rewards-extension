@@ -247,9 +247,10 @@ function render(store) {
     stateLine.textContent = "这次没有完成，已停止";
     stat3Label.textContent = "原因";
     stat3Value.textContent = model.failShort || "已停止";
-    primaryBtn.textContent = model.failReasonCode === A.FAIL_CODES.LOGIN ? "打开 Bing 并登录" : "继续";
+    const loginFail = A.isLoginFailCode(model.failReasonCode);
+    primaryBtn.textContent = loginFail ? "打开 Bing 并登录" : "继续";
     hint.textContent = model.continueHint || model.failMessage || "点继续会接着今天的进度，不会从头搜。";
-    primaryBtn.dataset.action = model.failReasonCode === A.FAIL_CODES.LOGIN ? "login" : "start";
+    primaryBtn.dataset.action = loginFail ? "login" : "start";
     return;
   }
 

@@ -18,7 +18,7 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "2.6.0";
+  const PRODUCT_VERSION = "2.7.0";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -62,6 +62,7 @@ const BingAssistant = (() => {
 
   const FAIL_CODES = {
     LOGIN: "login",
+    ACCOUNT_CHANGED: "account_changed",
     NO_GAIN: "no_gain",
     RISK: "risk",
     PAGE_CHANGED: "page_changed",
@@ -104,10 +105,10 @@ const BingAssistant = (() => {
   };
 
   const QUOTA_SELECTORS = {
-    cards: "mee-card, mee-rewards-daily-set-item-content, .c-card-content, .rewards-card, mee-rewards-point-breakdown, .pointsBreakdown, .pointsBreakdownCard, [class*='pointsBreakdown']",
-    breakdown: "#pointsBreakdown, .pointsBreakdown, mee-rewards-points-breakdown, .points-breakdown, mee-rewards-user-status-banner, [class*='points-breakdown']",
-    dailySection: "mee-rewards-daily-set-section, #daily-sets, .daily-set-section, [id*='dailySet'], [id*='daily-set']",
-    labeled: "[aria-label*='search' i], [aria-label*='Search'], [aria-label*='搜索'], [aria-label*='Daily'], [aria-label*='每日'], [aria-label*='Edge'], [aria-label*='Microsoft Edge'], [aria-label*='edge bonus' i], [aria-label*='奖励']",
+    cards: "mee-card, mee-rewards-daily-set-item-content, mee-rewards-item, .c-card-content, .rewards-card, .ds-card, .promo-card, mee-rewards-point-breakdown, .pointsBreakdown, .pointsBreakdownCard, [class*='pointsBreakdown'], [class*='earnPoints'], [data-bi-id*='search'], [data-bi-id*='edge']",
+    breakdown: "#pointsBreakdown, .pointsBreakdown, mee-rewards-points-breakdown, .points-breakdown, mee-rewards-user-status-banner, mee-rewards-user-status, [class*='points-breakdown'], [class*='bonus']",
+    dailySection: "mee-rewards-daily-set-section, #daily-sets, .daily-set-section, .dailySet, [id*='dailySet'], [id*='daily-set'], [class*='dailySet']",
+    labeled: "[aria-label*='search' i], [aria-label*='Search'], [aria-label*='搜索'], [aria-label*='Daily'], [aria-label*='每日'], [aria-label*='Edge'], [aria-label*='Microsoft Edge'], [aria-label*='edge bonus' i], [aria-label*='奖励'], [aria-label*='PC'], [aria-label*='Mobile'], [title*='search' i], [title*='搜索']",
     quizCount: ".rqQ, .rqQuestion, .wk_Circle, .TriviaOverlayData li, [aria-label*='Question']"
   };
 
@@ -507,9 +508,30 @@ const BingAssistant = (() => {
     return code === FAIL_CODES.MOBILE_NO_GAIN || code === FAIL_CODES.MOBILE_POINTS || code === FAIL_CODES.MOBILE_HEADER;
   }
 
+  function isLoginFailCode(code) {
+    return code === FAIL_CODES.LOGIN || code === FAIL_CODES.ACCOUNT_CHANGED;
+  }
+
+  function pointsLookLikeAccountChanged(previous, current) {
+    const prev = readablePoints(previous);
+    const curr = readablePoints(current);
+    if (prev === null || curr === null) return false;
+    if (curr >= prev) return false;
+    const drop = prev - curr;
+    if (prev >= 1000 && curr < 100) return true;
+    return curr * 10 <= prev && drop >= 200;
+  }
+
+  function loginLooksLost(login, extra = {}) {
+    if (login === "out") return true;
+    if (extra.accountChanged) return true;
+    if (extra.giveUp && extra.wasLoggedIn && extra.points == null && login !== "in") return true;
+    return false;
+  }
+
   function continueHint(model) {
     if (!model) return "点继续会接着今天的进度，不会从头搜。";
-    if (model.failReasonCode === FAIL_CODES.LOGIN) return model.failMessage || "请重新登录后再继续。";
+    if (isLoginFailCode(model.failReasonCode)) return model.failMessage || "请确认微软账号后继续今天的进度。";
     if (isMobileFailCode(model.failReasonCode)) {
       return model.failMessage || "可以用手机 Bing 做完，或点「我已用手机做完」。";
     }
@@ -528,11 +550,11 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "2.6 能看见页面上还剩什么",
+      title: "2.7 登录变了会停下来",
       points: [
-        "打开过 Rewards 后，若读到 Edge 奖励剩余会提一句；读不到不编、不自动点",
-        "电脑 / 移动 / 每日活动配额在中英混排时更不容易读空",
-        "测验常见题型更能点到选项；同一题 6 次仍在会退回你自己点"
+        "运行中掉登录，或积分突然对不上时会停，并提示去确认微软账号",
+        "电脑搜索做完后，能读到的移动 / Edge / 每日活动剩余会各提一句；没有数据不编",
+        "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
   }
@@ -729,12 +751,14 @@ const BingAssistant = (() => {
 
   function failCopy(code, extra = {}) {
     const limit = extra.limit || DEFAULT_NO_GAIN_LIMIT;
-    if (code === FAIL_CODES.LOGIN) {
+    if (isLoginFailCode(code)) {
+      const changed = extra.duringRun || extra.accountChanged || code === FAIL_CODES.ACCOUNT_CHANGED
+        || /登录状态变了/.test(String(extra.message || ""));
       return {
-        short: "需要重新登录",
-        next: "打开 Bing 并登录微软账号",
-        message: extra.duringRun
-          ? "登录状态已失效，已停止。请重新登录后再试。"
+        short: changed ? "登录状态变了" : "需要重新登录",
+        next: changed ? "请确认微软账号后继续今天的进度" : "打开 Bing 并登录微软账号",
+        message: changed
+          ? "登录状态变了，已停止。请确认微软账号后继续今天的进度"
           : "没有检测到积分。请确认已登录微软账号，然后重试。"
       };
     }
@@ -852,11 +876,11 @@ const BingAssistant = (() => {
 
   function classifyQuotaKind(text) {
     const t = String(text || "").toLowerCase().replace(/\s+/g, " ");
-    const edge = /search on microsoft edge|search using microsoft edge|microsoft edge bonus|edge bonus|edge 奖励|通过\s*microsoft\s*edge|在\s*microsoft\s*edge|使用\s*microsoft\s*edge|edge 上搜索/.test(t);
-    const mobile = /mobile search|移动(?:设备)?搜索|手机搜索|via mobile|bing mobile|search on mobile|在移动设备上搜索|在手机上搜索|移动端搜索/.test(t);
-    const pc = /pc search|desktop search|computer search|电脑搜索|电脑上搜索|在电脑上搜索|search on (?:the )?pc/.test(t)
+    const edge = /search on microsoft edge|search using microsoft edge|microsoft edge bonus|edge bonus|edge search bonus|edge 奖励|通过\s*microsoft\s*edge|在\s*microsoft\s*edge|使用\s*microsoft\s*edge|edge 上搜索|earn .{0,40}microsoft edge/.test(t);
+    const mobile = /mobile search(?:es)?|移动(?:设备)?搜索|手机搜索|via mobile|bing mobile|search on mobile|在移动设备上搜索|在手机上搜索|移动端搜索|on your phone/.test(t);
+    const pc = /pc search(?:es)?|desktop search(?:es)?|computer search(?:es)?|电脑搜索|电脑上搜索|在电脑上搜索|search on (?:the )?pc/.test(t)
       || (/search on bing/.test(t) && !mobile && !edge);
-    const daily = /daily set|每日任务|今日任务|daily check|每日活动|daily activities/.test(t);
+    const daily = /daily set|每日任务|今日任务|daily check|每日活动|daily activities|today's daily set/.test(t);
     const hits = [];
     if (edge) hits.push("edge");
     if (mobile) hits.push("mobile");
@@ -913,6 +937,10 @@ const BingAssistant = (() => {
     if (match) return normalizeQuotaRemaining(match[1], kind);
     match = raw.match(/(\d+)\s*(?:left|left to go)\b/i);
     if (match) return normalizeQuotaRemaining(match[1], kind);
+    match = raw.match(/还剩\s*(\d+)\s*次/);
+    if (match) return normalizeQuotaRemaining(match[1], kind);
+    match = raw.match(/(\d+)\s*searches?\s*remaining/i);
+    if (match) return normalizeQuotaRemaining(match[1], kind);
     return null;
   }
 
@@ -926,7 +954,7 @@ const BingAssistant = (() => {
       const trimmed = String(value || "").replace(/[ \t\u00a0]+/g, " ").trim();
       if (trimmed) chunks.push(trimmed);
     };
-    const splitLabels = /(?=\b(?:pc search|desktop search|computer search|mobile search|daily set|daily activities|search on microsoft edge|microsoft edge bonus|edge bonus)|(?:电脑搜索|电脑上搜索|在电脑上搜索|移动设备搜索|移动搜索|手机搜索|每日任务|今日任务|每日活动|edge 奖励|通过\s*microsoft\s*edge))/i;
+    const splitLabels = /(?=\b(?:pc search(?:es)?|desktop search(?:es)?|computer search(?:es)?|mobile search(?:es)?|daily set|daily activities|search on microsoft edge|microsoft edge bonus|edge bonus|edge search bonus)|(?:电脑搜索|电脑上搜索|在电脑上搜索|移动设备搜索|移动搜索|手机搜索|每日任务|今日任务|每日活动|edge 奖励|通过\s*microsoft\s*edge))/i;
     (Array.isArray(cardTexts) ? cardTexts : [cardTexts]).forEach((text) => {
       String(text || "").split(/[\n\r]+/).forEach((line) => {
         line.split(splitLabels).forEach(push);
@@ -958,10 +986,10 @@ const BingAssistant = (() => {
     }
     const blob = chunks.join(" \n ");
     const labels = [
-      ["mobile", /mobile search|移动(?:设备)?搜索|手机搜索|在移动设备上搜索|在手机上搜索|via mobile|search on mobile/i],
-      ["pc", /pc search|desktop search|computer search|电脑搜索|在电脑上搜索|电脑上搜索|search on (?:the )?pc/i],
-      ["daily", /daily set|每日任务|今日任务|每日活动|daily activities/i],
-      ["edge", /search on microsoft edge|microsoft edge bonus|edge bonus|edge 奖励|通过\s*microsoft\s*edge|search using microsoft edge/i]
+      ["mobile", /mobile search(?:es)?|移动(?:设备)?搜索|手机搜索|在移动设备上搜索|在手机上搜索|via mobile|search on mobile/i],
+      ["pc", /pc search(?:es)?|desktop search(?:es)?|computer search(?:es)?|电脑搜索|在电脑上搜索|电脑上搜索|search on (?:the )?pc/i],
+      ["daily", /daily set|每日任务|今日任务|每日活动|daily activities|today's daily set/i],
+      ["edge", /search on microsoft edge|microsoft edge bonus|edge bonus|edge search bonus|edge 奖励|通过\s*microsoft\s*edge|search using microsoft edge/i]
     ];
     labels.forEach(([kind, re]) => {
       if (result[kind]) return;
@@ -1024,14 +1052,16 @@ const BingAssistant = (() => {
   }
 
   function formatMobileHint(quota, store, now = new Date()) {
-    if (isMobileDoneToday(store, now)) {
-      if (!quota || !quota.mobile) return "你已标记今天用手机做完。这里只是你自己的标记";
-      return "你已标记今天用手机做完";
-    }
+    if (isMobileDoneToday(store, now)) return "你已标记今天用手机做完";
     if (!quota || !quota.mobile || quota.mobile.remaining == null) return "";
     if (quota.mobile.remaining <= 0) return "移动搜索今日已满";
     if (allowsMobileSearch(store)) return `移动搜索还剩 ${quota.mobile.remaining} 次`;
     return `移动搜索还剩 ${quota.mobile.remaining} 次，请用手机 Bing 完成`;
+  }
+
+  function formatDailyHint(quota) {
+    if (!quota || !quota.daily || quota.daily.remaining == null || quota.daily.remaining <= 0) return "";
+    return `每日活动还剩 ${quota.daily.remaining} 张`;
   }
 
   function formatMobileQuotaLine(quota, store, now = new Date()) {
@@ -1060,7 +1090,8 @@ const BingAssistant = (() => {
   }
 
   function formatQuotaHint(quota, store, now = new Date()) {
-    return [formatPcQuotaHint(quota), formatMobileHint(quota, store, now), formatEdgeHint(quota)].filter(Boolean).join("。");
+    const pc = quota && quota.pc && quota.pc.remaining > 0 ? formatPcQuotaHint(quota) : "";
+    return [pc, formatMobileHint(quota, store, now), formatDailyHint(quota), formatEdgeHint(quota)].filter(Boolean).join("。");
   }
 
   function formatCompleteQuotaHint(quota, store, now = new Date()) {
@@ -1068,6 +1099,8 @@ const BingAssistant = (() => {
     if (quota && quota.pc && quota.pc.remaining > 0) bits.push(formatPcQuotaHint(quota));
     const mobile = formatMobileHint(quota, store, now);
     if (mobile) bits.push(mobile);
+    const daily = formatDailyHint(quota);
+    if (daily) bits.push(daily);
     const edge = formatEdgeHint(quota);
     if (edge) bits.push(edge);
     return bits.filter(Boolean).join("。");
@@ -1754,6 +1787,9 @@ const BingAssistant = (() => {
     buildKeywordPlan,
     failCopy,
     isMobileFailCode,
+    isLoginFailCode,
+    pointsLookLikeAccountChanged,
+    loginLooksLost,
     isDangerEnabled,
     allowsHighRiskTasks,
     allowsQuizAssist,
@@ -1790,6 +1826,7 @@ const BingAssistant = (() => {
     mergeQuotaSnapshot,
     formatPcQuotaHint,
     formatMobileHint,
+    formatDailyHint,
     formatMobileQuotaLine,
     formatEdgeHint,
     formatEdgeQuotaLine,
