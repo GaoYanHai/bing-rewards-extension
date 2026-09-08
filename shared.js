@@ -18,7 +18,7 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "2.9.0";
+  const PRODUCT_VERSION = "3.0.0";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -193,14 +193,18 @@ const BingAssistant = (() => {
 
   const SHORT_KEYWORD_POOL = [
     "天气", "新闻", "外卖", "小说", "基金", "篮球", "足球",
-    "天气预报", "今日新闻", "翻译", "地图", "汇率查询", "股票行情", "快递查询", "家常菜谱",
-    "电影票", "火车票", "今日油价", "手机推荐", "笔记本电脑", "无线耳机", "数码相机",
-    "健身计划", "减肥方法", "护肤步骤", "穿搭灵感", "旅游攻略", "酒店预订", "机票查询",
-    "世界杯", "足球比分", "NBA赛况", "编程入门", "英语单词", "历史故事", "物理科普",
-    "基金入门", "保险知识", "理财方法", "咖啡做法", "新能源汽车", "驾照考试", "宠物护理",
-    "小说推荐", "音乐排行", "手机游戏", "动漫推荐", "健康饮食", "地方小吃", "宇宙探索",
-    "智能家居", "机械键盘", "相机镜头", "二手车", "自驾游", "心理学", "地理知识"
+    "翻译", "地图", "快递", "油价", "汇率", "股票", "菜谱",
+    "电影票", "火车票", "机票", "酒店", "健身", "减肥", "护肤",
+    "穿搭", "旅游", "世界杯", "NBA", "英语", "历史", "理财",
+    "咖啡", "驾照", "宠物", "音乐", "游戏", "动漫", "小吃",
+    "键盘", "相机", "二手车", "自驾游", "租房", "房价", "地铁",
+    "公积金", "个税", "医院", "药店", "限行", "空气质量",
+    "计算器", "成语", "古诗", "面试", "招聘", "话费",
+    "天气预报", "今日新闻", "附近外卖", "家常菜", "足球比分",
+    "英语单词", "驾照考试", "手机游戏", "地方小吃", "机械键盘",
+    "附近美食", "黄金价格", "航班动态", "列车时刻"
   ];
+  const COMMON_SHORT_KEYWORDS = ["天气", "新闻"];
 
   const LONG_KEYWORD_POOL = [
     "人工智能最新进展", "ChatGPT使用技巧", "智能手机推荐", "笔记本电脑选购", "平板电脑对比",
@@ -578,11 +582,11 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "2.9 搜索间隔更自然一点",
+      title: "3.0 更像人、更少抢焦点",
       points: [
-        "搜索间隔仍是 8 秒起，每次不会完全一样",
-        "收掉已经不用的词库下拉；换一批、拉黑、周末词库都还在",
-        "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
+        "新安装默认在搜索框里输入；已经关掉的不会被改回来",
+        "定时 / 补做开始时，不会把你正在用的窗口抢到最前",
+        "搜索词更像日常会搜的短词；收掉已经不用的打开原文"
       ]
     };
   }
@@ -749,7 +753,7 @@ const BingAssistant = (() => {
       pool = SHORT_KEYWORD_POOL.filter((word) => !blocked.has(word));
     }
     if (!pool.length) pool = SHORT_KEYWORD_POOL.slice();
-    const preferred = pool.filter((word) => word.length >= 2 && word.length <= 8);
+    const preferred = pool.filter((word) => word.length >= 2 && word.length <= 6);
     const source = preferred.length >= Math.min(8, count) ? preferred.concat(pool.filter((word) => !preferred.includes(word))) : pool;
     const shuffle = readNumber(store, KEYS.keywordShuffle, 0);
     let seed = dailyRandomSeed(`${localDateString(now)}|${pack}|${shuffle}`);
@@ -763,12 +767,16 @@ const BingAssistant = (() => {
       seed += 1;
       shuffled = seededShuffle(source, seed);
     }
-    const shorts = result.filter((item) => item.title.length === 2);
-    if (target >= 10 && shorts.length) {
-      const extra = shorts[seed % shorts.length];
-      const pos = Math.min(result.length - 1, (seed % Math.max(2, result.length - 2)) + 1);
-      result.splice(pos, 0, extra);
-      if (result.length > target) result.pop();
+    const allowCommonRepeat = requestedPack !== WORD_PACK_CUSTOM && pack === WORD_PACK_SHORT && target >= 10;
+    if (allowCommonRepeat) {
+      const common = COMMON_SHORT_KEYWORDS.filter((word) => source.includes(word));
+      const repeatN = common.length ? Math.min(common.length, 1 + (seed % 2)) : 0;
+      for (let i = 0; i < repeatN; i++) {
+        const extra = keywordToItem(common[i % common.length]);
+        const pos = Math.min(result.length - 1, ((seed + (i + 1) * 11) % Math.max(2, result.length - 2)) + 1);
+        result.splice(pos, 0, extra);
+        if (result.length > target) result.pop();
+      }
     }
     return {
       date: localDateString(now),
@@ -1778,6 +1786,7 @@ const BingAssistant = (() => {
     QUOTA_SELECTORS,
     KEYS,
     SHORT_KEYWORD_POOL,
+    COMMON_SHORT_KEYWORDS,
     LONG_KEYWORD_POOL,
     WEEKEND_KEYWORD_POOL,
     localDateString,
