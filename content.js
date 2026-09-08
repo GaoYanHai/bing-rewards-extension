@@ -245,12 +245,21 @@ GM_addStyle(`
     input[type=checkbox] { accent-color: #0078d4; }
     #rebang-widget { width: 300px; max-width: calc(100vw - 24px); }
     #rebang-header { min-height: 48px; padding: 8px 12px; gap: 8px; flex-wrap: nowrap; }
-    #rebang-title { font-size: 13px; }
-    #rebang-mini-progress { margin-left: auto; font-size: 12px; color: #0078d4; font-weight: 600; white-space: nowrap; }
-    #rebang-mini-current { font-size: 12px; color: #666; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #rebang-title { font-size: 13px; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #rebang-mini-progress { margin-left: auto; font-size: 12px; color: #0078d4; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+    #rebang-mini-current { font-size: 12px; color: #666; max-width: 88px; min-width: 0; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #888; display: inline-block; flex-shrink: 0; }
     .status-dot.running { background: #107c10; }
-    #ext-autosearch-lock { height: 32px; padding: 0 12px; }
+    #ext-autosearch-lock, #ext-stop-rewards {
+        height: 32px;
+        padding: 0 12px;
+        flex-shrink: 0;
+        white-space: nowrap;
+        line-height: 32px;
+        writing-mode: horizontal-tb;
+        word-break: keep-all;
+    }
+    #rebang-toggle-icon { flex-shrink: 0; }
     .rebang-pack-note { font-size: 12px; color: #666; margin: 8px 0; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
     .rebang-log { font-size: 12px; color: #666; padding: 2px 0; }
     #ext-task-list { margin: 8px 0; max-height: 180px; overflow: auto; }

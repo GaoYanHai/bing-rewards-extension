@@ -4,3 +4,4 @@ Thumbs.db
 *.pem
 *.zip
 .tmp_*
+.edge-publish.env
