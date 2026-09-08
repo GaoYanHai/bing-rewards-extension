@@ -18,7 +18,7 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "3.0.0";
+  const PRODUCT_VERSION = "3.0.1";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -582,11 +582,11 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "3.0 更像人、更少抢焦点",
+      title: "3.0.1 迷你条停止按钮不再竖排",
       points: [
-        "新安装默认在搜索框里输入；已经关掉的不会被改回来",
-        "定时 / 补做开始时，不会把你正在用的窗口抢到最前",
-        "搜索词更像日常会搜的短词；收掉已经不用的打开原文"
+        "迷你条点开始后，「停止」会横着排，不会被挤成竖字",
+        "3.0 的默认输入、定时不抢窗口都还在",
+        "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
   }

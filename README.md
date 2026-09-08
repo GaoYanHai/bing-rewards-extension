@@ -4,7 +4,7 @@
 
 对外名称：Bing 积分助手（Bing Rewards Assistant）
 
-当前版本：3.0.0
+当前版本：3.0.1
 
 商店：[在 Edge 加载项中获取](https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj)
 
@@ -83,6 +83,14 @@
 详见 [PRIVACY.md](PRIVACY.md)。设置、词库和进度都只存在本机，不会上传。
 
 ## 更新日志
+
+### 3.0.1 - 2026-09-08
+
+把 3.0.0 发布后才改好的迷你条补丁打进包。不是新功能。
+
+- 迷你条点开始后，「停止」会横着排，不会被挤成竖字
+- 3.0 的默认输入、定时不抢窗口都还在
+- 默认仍是安全模式，只做电脑搜索；权限与已上架包一致
 
 ### 3.0.0 - 2026-09-08
 
