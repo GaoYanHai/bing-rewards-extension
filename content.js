@@ -2199,12 +2199,7 @@ function renderKeywords(keywords) {
     let safeText = escapeHtml(truncateText(element.title, 20));
     let linkHtml = "";
     const rowInner = `<em>${index + 1}</em><span>${safeText}</span>`;
-    if ($("#ext-keywords-linktype").val() == "搜索") {
-        linkHtml = `<a target='_self' class='keyword-link keyword-link-search ${activeClass}' title='${safeTitle}' href='#'>${rowInner}</a>`;
-    } else {
-        let safeUrl = escapeHtml(element.url ?? element.mobileUrl);
-        linkHtml = `<a target='_blank' class='keyword-link ${activeClass}' title='${safeTitle}' href='${safeUrl}'>${rowInner}</a>`;
-    }
+    linkHtml = `<a target='_self' class='keyword-link keyword-link-search ${activeClass}' title='${safeTitle}' href='#'>${rowInner}</a>`;
     $("#ext-keywords-list").append(linkHtml);
   });
 
@@ -2452,7 +2447,6 @@ function initSearchControls() {
             </div>
             <div id="ext-recent-logs"></div>
             <input type="hidden" id="ext-autosearch-limit" value="${savedLimit}">
-            <select id="ext-keywords-linktype" hidden><option value="搜索" selected>搜索</option></select>
             <span id="ext-current-count" hidden>0</span>
             <span id="ext-current-keyword" hidden>-</span>
             <span id="ext-status-indicator" hidden></span>

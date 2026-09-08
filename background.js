@@ -23,32 +23,58 @@ async function scheduleNextAlarm() {
   await chrome.alarms.create(A.ALARM_NAME, { when });
 }
 
-async function openOrWakeSearchTab() {
-  const tabs = await chrome.tabs.query({ url: ["*://*.bing.com/search*"] });
+function wantsForeground(options) {
+  return !options || options.foreground !== false;
+}
+
+async function getLastFocusedWindow() {
+  try {
+    return await chrome.windows.getLastFocused();
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function shouldActivateInWindow(windowId, foreground) {
+  if (foreground) return true;
+  const last = await getLastFocusedWindow();
+  return Boolean(last && last.focused === true && (typeof windowId !== "number" || last.id === windowId));
+}
+
+async function focusWindowIfNeeded(windowId, foreground) {
+  if (!foreground || typeof windowId !== "number") return;
+  try {
+    await chrome.windows.update(windowId, { focused: true });
+  } catch (_error) {}
+}
+
+async function openOrWakeTab(queryUrls, navigateUrl, options = {}) {
+  const foreground = wantsForeground(options);
+  const tabs = await chrome.tabs.query({ url: queryUrls });
   const usableTab = tabs.find((tab) => typeof tab.id === "number");
   if (usableTab) {
-    await chrome.tabs.update(usableTab.id, { active: true, url: A.SEARCH_URL });
-    if (typeof usableTab.windowId === "number") {
-      await chrome.windows.update(usableTab.windowId, { focused: true });
-    }
+    const active = await shouldActivateInWindow(usableTab.windowId, foreground);
+    const update = { active };
+    if (options.replaceUrl && navigateUrl) update.url = navigateUrl;
+    await chrome.tabs.update(usableTab.id, update);
+    await focusWindowIfNeeded(usableTab.windowId, foreground);
     return usableTab.id;
   }
-  const created = await chrome.tabs.create({ url: A.SEARCH_URL, active: true });
+  const last = await getLastFocusedWindow();
+  const active = foreground || Boolean(last && last.focused === true);
+  const createInfo = { url: navigateUrl, active };
+  if (typeof last?.id === "number") createInfo.windowId = last.id;
+  const created = await chrome.tabs.create(createInfo);
+  await focusWindowIfNeeded(created.windowId, foreground);
   return created.id;
 }
 
-async function openOrWakeRewardsTab() {
-  const tabs = await chrome.tabs.query({ url: ["https://rewards.bing.com/*"] });
-  const usableTab = tabs.find((tab) => typeof tab.id === "number");
-  if (usableTab) {
-    await chrome.tabs.update(usableTab.id, { active: true });
-    if (typeof usableTab.windowId === "number") {
-      await chrome.windows.update(usableTab.windowId, { focused: true });
-    }
-    return usableTab.id;
-  }
-  const created = await chrome.tabs.create({ url: A.REWARDS_URL, active: true });
-  return created.id;
+async function openOrWakeSearchTab(options = {}) {
+  return openOrWakeTab(["*://*.bing.com/search*"], A.SEARCH_URL, { ...options, replaceUrl: true });
+}
+
+async function openOrWakeRewardsTab(options = {}) {
+  return openOrWakeTab(["https://rewards.bing.com/*"], A.REWARDS_URL, { ...options, replaceUrl: false });
 }
 
 async function clearMobileUaRules() {
@@ -137,7 +163,7 @@ async function failToday(code, extra = {}) {
   return { ok: false, handled: true, error: message, reasonCode: code };
 }
 
-async function startMobileSearch() {
+async function startMobileSearch(options = {}) {
   const store = await readStore();
   if (!A.shouldRunMobileSearch(store)) {
     return { ok: false, skipped: true, error: "今天不用做移动搜索" };
@@ -152,16 +178,31 @@ async function startMobileSearch() {
       tabId = 0;
     }
   }
+  const foreground = wantsForeground(options);
   const url = A.buildSearchUrl("天气预报", { mobile: true });
   try {
     if (tabId) {
       await applyMobileUaRules(tabId);
-      await chrome.tabs.update(tabId, { active: true, url });
+      let windowId;
+      try {
+        const existing = await chrome.tabs.get(tabId);
+        windowId = existing && existing.windowId;
+      } catch (_error) {
+        windowId = undefined;
+      }
+      const active = await shouldActivateInWindow(windowId, foreground);
+      await chrome.tabs.update(tabId, { active, url });
+      await focusWindowIfNeeded(windowId, foreground);
     } else {
-      const blank = await chrome.tabs.create({ url: "about:blank", active: true });
+      const last = await getLastFocusedWindow();
+      const active = foreground || Boolean(last && last.focused === true);
+      const createInfo = { url: "about:blank", active };
+      if (typeof last?.id === "number") createInfo.windowId = last.id;
+      const blank = await chrome.tabs.create(createInfo);
       tabId = blank.id;
       await applyMobileUaRules(tabId);
       await chrome.tabs.update(tabId, { url });
+      await focusWindowIfNeeded(blank.windowId, foreground);
     }
   } catch (_error) {
     if (tabId) {
@@ -201,7 +242,7 @@ async function advanceAfterMobile(message) {
       [KEYS.pauseReason]: "",
       [KEYS.lastStatusMessage]: message || "正在打开每日活动"
     });
-    await openOrWakeRewardsTab();
+    await openOrWakeRewardsTab({ foreground: false });
     await updateBadge();
     return { ok: true, next: "daily" };
   }
@@ -453,7 +494,7 @@ async function applyDefaultsIfNeeded() {
   if (store[KEYS.pauseReason] === undefined) patch[KEYS.pauseReason] = "";
   if (store[KEYS.searchIntervalMin] === undefined) patch[KEYS.searchIntervalMin] = A.DEFAULT_INTERVAL_MIN;
   if (store[KEYS.searchIntervalMax] === undefined) patch[KEYS.searchIntervalMax] = A.DEFAULT_INTERVAL_MAX;
-  if (store[KEYS.simulateTyping] === undefined) patch[KEYS.simulateTyping] = false;
+  if (store[KEYS.simulateTyping] === undefined) patch[KEYS.simulateTyping] = true;
   if (store[KEYS.pauseWhenBusy] === undefined) patch[KEYS.pauseWhenBusy] = true;
   if (store[KEYS.repeatRule] === undefined) patch[KEYS.repeatRule] = A.REPEAT.DAILY;
   if (store[KEYS.userTaskAction] === undefined) patch[KEYS.userTaskAction] = "";
@@ -480,11 +521,12 @@ function syncGoalPatch(goal) {
 
 async function startToday(reason = "manual") {
   const store = await readStore();
+  const foreground = reason !== "alarm" && reason !== "catchup" && reason !== "missed";
   if (store[KEYS.riskAccepted] !== true) {
     return { ok: false, error: "请先确认使用风险" };
   }
   if (store[KEYS.loginState] === "out") {
-    await openOrWakeSearchTab();
+    await openOrWakeSearchTab({ foreground: true });
     return { ok: false, error: "请先登录微软账号" };
   }
   const model = A.buildViewModel(store);
@@ -524,12 +566,12 @@ async function startToday(reason = "manual") {
   });
 
   if (model.count >= model.limit && model.mobilePending) {
-    return startMobileSearch();
+    return startMobileSearch({ foreground });
   }
   if (model.count >= model.limit && model.dailyEnabled && !model.dailyDone) {
-    await openOrWakeRewardsTab();
+    await openOrWakeRewardsTab({ foreground });
   } else {
-    await openOrWakeSearchTab();
+    await openOrWakeSearchTab({ foreground });
   }
   await updateBadge();
   return { ok: true };
@@ -597,7 +639,7 @@ async function resumeToday(options = {}) {
   });
   const next = await readStore();
   if (next[KEYS.searchPhase] === "mobile" && A.shouldRunMobileSearch(next)) {
-    await startMobileSearch();
+    await startMobileSearch({ foreground: true });
   }
   await updateBadge();
   return { ok: true };
@@ -652,7 +694,7 @@ async function startDailyRun(reason = "alarm") {
   if (alreadyTriggered) return;
   if (model.count >= model.limit && (!model.dailyEnabled || model.dailyDone)) return;
   if (store[KEYS.loginState] === "out") {
-    await openOrWakeSearchTab();
+    await openOrWakeSearchTab({ foreground: true });
     await notify("bing-assistant-login", "还没有登录微软账号，今天的任务还没开始。");
     return;
   }
@@ -894,7 +936,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const durationMs = startedAt > 0 ? Date.now() - startedAt : 0;
     readStore().then(async (store) => {
       if (reason === "complete" && A.shouldRunMobileSearch(store)) {
-        const started = await startMobileSearch();
+        const started = await startMobileSearch({ foreground: false });
         if (started && (started.ok || started.handled)) return;
       }
       await clearMobileSearchSession({ phase: "" });
