@@ -1,4 +1,4 @@
-const BingAssistant = (() => {
+﻿const BingAssistant = (() => {
   const PRODUCT_NAME_ZH = "Bing 积分助手";
   const PRODUCT_NAME_EN = "Bing Rewards Assistant";
   const SEARCH_URL = "https://www.bing.com/search?q=%E5%A4%A9%E6%B0%94%E9%A2%84%E6%8A%A5";
@@ -18,7 +18,7 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "3.2.0";
+  const PRODUCT_VERSION = "3.3.0";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -582,10 +582,10 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "3.2.0 商店里也能安静用",
+      title: "3.3.0 更轻更快",
       points: [
-        "商店用户也能用到安静开始：卡住了最多切到那个标签，不会把窗口抢到最前",
-        "搜索页不再藏着脚本用的 hidden 状态；迷你条、换一批、拉黑都还在",
+        "去掉了 jQuery，扩展包轻了 87KB；功能和界面完全不变",
+        "存储层和错误处理更可靠，出错不再静默",
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
@@ -910,7 +910,7 @@ const BingAssistant = (() => {
     try {
       if (root && root.querySelector && TASK_SELECTORS.quizPage && root.querySelector(TASK_SELECTORS.quizPage)) return true;
       if (root && root.querySelector && TASK_SELECTORS.votePage && root.querySelector(TASK_SELECTORS.votePage)) return true;
-    } catch (_error) {}
+    } catch (error) { warn("quizPageDetect", error); }
     return false;
   }
 
@@ -1739,6 +1739,189 @@ const BingAssistant = (() => {
     return `今晚 ${formatClock(SUGGESTED_HOUR, SUGGESTED_MINUTE)}`;
   }
 
+  const _eventStore = new WeakMap();
+
+  function _getHandlers(el) {
+    let map = _eventStore.get(el);
+    if (!map) { map = {}; _eventStore.set(el, map); }
+    return map;
+  }
+
+  function _splitEvent(name) {
+    const dot = name.indexOf(".");
+    return dot === -1 ? { type: name, ns: "" } : { type: name.slice(0, dot), ns: name.slice(dot) };
+  }
+
+  function $(selector, context) {
+    let els;
+    if (typeof selector === "string") {
+      const root = (context && context.nodeType) ? context : document;
+      try { els = Array.from(root.querySelectorAll(selector)); } catch (_) { els = []; }
+    } else if (selector && selector.nodeType) {
+      els = [selector];
+    } else if (Array.isArray(selector)) {
+      els = selector.filter(Boolean);
+    } else {
+      els = [];
+    }
+    const api = {
+      length: els.length,
+      text(text) {
+        if (text !== undefined) { els.forEach(e => { e.textContent = text; }); return api; }
+        return els.length ? (els[0].textContent || "") : "";
+      },
+      html(html) {
+        if (html !== undefined) { els.forEach(e => { e.innerHTML = html; }); return api; }
+        return els.length ? els[0].innerHTML : "";
+      },
+      val(value) {
+        if (value !== undefined) { els.forEach(e => { e.value = value; }); return api; }
+        return els.length ? els[0].value : "";
+      },
+      attr(name, value) {
+        if (value !== undefined) { els.forEach(e => e.setAttribute(name, value)); return api; }
+        return els.length ? els[0].getAttribute(name) : null;
+      },
+      addClass(cls) { els.forEach(e => e.classList.add(cls)); return api; },
+      removeClass(cls) { els.forEach(e => e.classList.remove(cls)); return api; },
+      toggleClass(cls, force) { els.forEach(e => e.classList.toggle(cls, force)); return api; },
+      hasClass(cls) {
+        return els.length > 0 && els[0].classList.contains(cls);
+      },
+      css(prop, val) {
+        if (val !== undefined) { els.forEach(e => { e.style[prop] = val; }); return api; }
+        if (typeof prop === "object") {
+          els.forEach(e => { for (const k in prop) { e.style[k] = prop[k]; } });
+          return api;
+        }
+        return els.length ? getComputedStyle(els[0])[prop] : "";
+      },
+      on(name, fn) {
+        els.forEach(el => {
+          const { type } = _splitEvent(name);
+          el.addEventListener(type, fn);
+          const map = _getHandlers(el);
+          if (!map[name]) map[name] = [];
+          map[name].push(fn);
+        });
+        return api;
+      },
+      off(name, fn) {
+        els.forEach(el => {
+          const { type } = _splitEvent(name);
+          const map = _getHandlers(el);
+          if (map[name]) {
+            map[name].forEach(h => el.removeEventListener(type, h));
+            delete map[name];
+          }
+          if (fn) el.removeEventListener(type, fn);
+        });
+        return api;
+      },
+      click(fn) {
+        if (typeof fn === "function") { return api.on("click", fn); }
+        els.forEach(e => e.click());
+        return api;
+      },
+      find(sel) {
+        const results = [];
+        els.forEach(e => { try { results.push(...e.querySelectorAll(sel)); } catch (_) {} });
+        return $(results);
+      },
+      children(sel) {
+        const results = [];
+        els.forEach(e => {
+          const kids = Array.from(e.children);
+          if (sel) {
+            kids.forEach(c => { try { if (c.matches(sel)) results.push(c); } catch (_) {} });
+          } else {
+            results.push(...kids);
+          }
+        });
+        return $(results);
+      },
+      empty() {
+        els.forEach(e => { while (e.firstChild) e.removeChild(e.firstChild); });
+        return api;
+      },
+      closest(sel) {
+        const results = [];
+        els.forEach(e => { const p = e.closest(sel); if (p) results.push(p); });
+        return $(results);
+      },
+      first() {
+        return els.length ? $([els[0]]) : $([]);
+      },
+      each(fn) {
+        els.forEach((el, i) => fn.call(el, i, el));
+        return api;
+      },
+      filter(fn) {
+        return $(els.filter(el => fn.call(el, 0, el)));
+      },
+      append(html) {
+        els.forEach(e => e.insertAdjacentHTML("beforeend", html));
+        return api;
+      },
+      show() { els.forEach(e => { e.style.display = ""; }); return api; },
+      hide() { els.forEach(e => { e.style.display = "none"; }); return api; },
+      remove() { els.forEach(e => e.remove()); return api; },
+      scrollTop(val) {
+        if (val !== undefined) { els.forEach(e => { e.scrollTop = val; }); return api; }
+        return els.length ? els[0].scrollTop : 0;
+      },
+      trigger(eventName) {
+        els.forEach(e => {
+          const nativeFn = e[eventName];
+          if (typeof nativeFn === "function") nativeFn.call(e);
+          else e.dispatchEvent(new Event(eventName, { bubbles: true }));
+        });
+        return api;
+      },
+      ready(fn) {
+        if (document.readyState !== "loading") fn();
+        else document.addEventListener("DOMContentLoaded", fn);
+        return api;
+      }
+    };
+    els.forEach((el, i) => { api[i] = el; });
+    return api;
+  }
+
+  function warn(label, error) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn(`[Bing助手] ${label}`, error || "");
+    }
+  }
+
+  const Storage = {
+    async get(keys) {
+      try {
+        return await chrome.storage.local.get(keys);
+      } catch (error) {
+        warn("Storage.get 失败", error);
+        return {};
+      }
+    },
+    async getAll() {
+      try {
+        return await chrome.storage.local.get(null);
+      } catch (error) {
+        warn("Storage.getAll 失败", error);
+        return {};
+      }
+    },
+    async set(patch) {
+      try {
+        await chrome.storage.local.set(patch);
+        return true;
+      } catch (error) {
+        warn("Storage.set 失败", error);
+        return false;
+      }
+    }
+  };
+
   return {
     PRODUCT_NAME_ZH,
     PRODUCT_NAME_EN,
@@ -1889,10 +2072,14 @@ const BingAssistant = (() => {
     formatQuizAssistFallback,
     readTaskList,
     buildViewModel,
-    suggestedTimeLabel
+    suggestedTimeLabel,
+    warn,
+    Storage,
+    $
   };
 })();
 
 if (typeof globalThis !== "undefined") {
   globalThis.BingAssistant = BingAssistant;
+  globalThis.$ = BingAssistant.$;
 }
