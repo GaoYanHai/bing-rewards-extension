@@ -48,6 +48,77 @@ async function focusWindowIfNeeded(windowId, foreground) {
   } catch (_error) {}
 }
 
+const QUIET_WATCHDOG_ALARM = "rebang-quiet-watchdog";
+const QUIET_STUCK_AFTER_MS = 45000;
+const QUIET_HEARTBEAT_STALE_MS = 20000;
+
+async function clearQuietWatchdog() {
+  try {
+    await chrome.alarms.clear(QUIET_WATCHDOG_ALARM);
+  } catch (_error) {}
+}
+
+async function scheduleQuietWatchdog() {
+  await clearQuietWatchdog();
+  try {
+    await chrome.alarms.create(QUIET_WATCHDOG_ALARM, { when: Date.now() + QUIET_STUCK_AFTER_MS });
+  } catch (_error) {}
+}
+
+async function activateTabWithoutFocus(tabId) {
+  if (typeof tabId !== "number") return false;
+  try {
+    await chrome.tabs.update(tabId, { active: true });
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function findWorkingTabId(store) {
+  if (store[KEYS.searchPhase] === "mobile") {
+    const mobileId = Number(store[KEYS.mobileSearchTabId] || 0);
+    if (mobileId) {
+      try {
+        const tab = await chrome.tabs.get(mobileId);
+        if (tab && typeof tab.id === "number") return tab.id;
+      } catch (_error) {}
+    }
+  }
+  const queryUrls = store[KEYS.searchPhase] === "daily"
+    ? ["https://rewards.bing.com/*"]
+    : ["*://*.bing.com/search*"];
+  try {
+    const tabs = await chrome.tabs.query({ url: queryUrls });
+    const tab = tabs.find((item) => typeof item.id === "number");
+    if (tab) return tab.id;
+  } catch (_error) {}
+  return 0;
+}
+
+async function nudgeQuietTabIfStuck() {
+  const store = await readStore();
+  if (!A.isLockOn(store)) return;
+  if (store[KEYS.paused] === true) return;
+  if (store[KEYS.productState] !== "running") return;
+  if (store[KEYS.waitingUserTask]) return;
+  const now = Date.now();
+  const startedAt = Number(store[KEYS.runStartedAt] || 0);
+  if (startedAt && now - startedAt < QUIET_STUCK_AFTER_MS - 5000) return;
+  const lastRun = Number(store[KEYS.globalLastRunTime] || 0);
+  if (lastRun > 0 && now - lastRun < QUIET_HEARTBEAT_STALE_MS) return;
+  let tabId = await findWorkingTabId(store);
+  if (!tabId) {
+    if (store[KEYS.searchPhase] === "daily") tabId = await openOrWakeRewardsTab({ foreground: false });
+    else tabId = await openOrWakeSearchTab({ foreground: false });
+  }
+  const activated = await activateTabWithoutFocus(tabId);
+  if (!activated) return;
+  await chrome.storage.local.set({
+    [KEYS.runLogs]: withLog(store, { action: "搜索标签没有动静，已切到该标签", result: "窗口没有抢到最前" })
+  });
+}
+
 async function openOrWakeTab(queryUrls, navigateUrl, options = {}) {
   const foreground = wantsForeground(options);
   const tabs = await chrome.tabs.query({ url: queryUrls });
@@ -127,6 +198,7 @@ async function clearMobileSearchSession(extra = {}) {
 }
 
 async function failToday(code, extra = {}) {
+  await clearQuietWatchdog();
   await clearMobileSearchSession({ phase: "" });
   const store = await readStore();
   const copy = A.failCopy(code, extra);
@@ -329,6 +401,7 @@ async function recoverStaleRun() {
 }
 
 async function completeTodayFromBackground(store, message) {
+  await clearQuietWatchdog();
   await clearMobileSearchSession({ phase: "" });
   const model = A.buildViewModel(store);
   const startedAt = A.readNumber(store, KEYS.runStartedAt, 0);
@@ -520,6 +593,7 @@ function syncGoalPatch(goal) {
 }
 
 async function startToday(reason = "manual") {
+  await clearQuietWatchdog();
   const store = await readStore();
   const foreground = reason !== "alarm" && reason !== "catchup" && reason !== "missed";
   if (store[KEYS.riskAccepted] !== true) {
@@ -566,18 +640,23 @@ async function startToday(reason = "manual") {
   });
 
   if (model.count >= model.limit && model.mobilePending) {
-    return startMobileSearch({ foreground });
+    const started = await startMobileSearch({ foreground });
+    if (started && started.ok && !foreground) await scheduleQuietWatchdog();
+    await updateBadge();
+    return started;
   }
   if (model.count >= model.limit && model.dailyEnabled && !model.dailyDone) {
     await openOrWakeRewardsTab({ foreground });
   } else {
     await openOrWakeSearchTab({ foreground });
   }
+  if (!foreground) await scheduleQuietWatchdog();
   await updateBadge();
   return { ok: true };
 }
 
 async function stopToday(message = "已停止") {
+  await clearQuietWatchdog();
   await clearMobileSearchSession({ phase: "" });
   const store = await readStore();
   const model = A.buildViewModel(store);
@@ -595,6 +674,7 @@ async function stopToday(message = "已停止") {
 }
 
 async function pauseToday(reason = A.PAUSE_REASONS.USER, message) {
+  await clearQuietWatchdog();
   const store = await readStore();
   if (!A.isLockOn(store)) {
     return { ok: false, error: "还没有开始今天的任务" };
@@ -758,6 +838,10 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === QUIET_WATCHDOG_ALARM) {
+    void nudgeQuietTabIfStuck();
+    return;
+  }
   if (alarm.name !== A.ALARM_NAME) return;
   void startDailyRun("alarm").finally(scheduleNextAlarm);
 });
@@ -935,8 +1019,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const startedAt = Number(message.startedAt || 0);
     const durationMs = startedAt > 0 ? Date.now() - startedAt : 0;
     readStore().then(async (store) => {
+      await clearQuietWatchdog();
       if (reason === "complete" && A.shouldRunMobileSearch(store)) {
         const started = await startMobileSearch({ foreground: false });
+        if (started && started.ok) await scheduleQuietWatchdog();
         if (started && (started.ok || started.handled)) return;
       }
       await clearMobileSearchSession({ phase: "" });
