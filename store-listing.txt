@@ -1,10 +1,20 @@
 # 商店已上架
 
 Edge 加载项：https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj
-2.5.0 已通过审核。3.0.0 已提交审核。3.0.1 / 3.1.0 等当前审核结束后再作为商店更新上传，不要叠第二份审核，也不要撤回 2.5.0。
+3.0.1 已通过审核并上架。3.2.0 含 3.1 卡住只激活标签，以及搜索页 hidden 状态节点迁移，可作为商店更新上传。不要叠第二份审核，也不要撤回已上架版本。
 权限表、产品名、隐私政策与下方已提交说明保持一致，不要两套说法。
 
-## 3.1.0 更新说明（给商店后台，等当前审核结束后再用）
+## 3.2.0 更新说明（给商店后台）
+
+- 商店用户也能用到安静开始：卡住了最多切到那个标签，不会把窗口抢到最前
+- 搜索页不再藏着脚本用的 hidden 状态；迷你条、换一批、拉黑都还在
+- 新安装默认在搜索框里输入；已经关掉的不会被改回来
+- 迷你条点开始后，「停止」会横着排，不会被挤成竖字
+- 搜索间隔仍是 8 秒起，每次不会完全一样
+- 仍默认只做电脑搜索。移动搜索和测验作答仍是可选危险项，失败会停
+- 不改权限、不换产品名、不自动点 Edge 奖励
+
+## 3.1.0 更新说明（GitHub 已发；能力已并入 3.2.0）
 
 - 定时 / 补做开始后，如果搜索标签没有动静，只会切到那个标签，不会把窗口抢到最前
 - 新安装默认在搜索框里输入；已经关掉的不会被改回来
@@ -35,9 +45,9 @@ Edge 加载项：https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicn
 - 仍默认只做电脑搜索。移动搜索和测验作答仍是可选危险项，失败会停
 - 不改权限、不换产品名、不自动点 Edge 奖励
 
-# Edge Add-ons 提交用文案（3.1.0，权限说明与 2.5.0 一致）
+# Edge Add-ons 提交用文案（3.2.0，权限说明与已上架包一致）
 
-安装包：bing-rewards-extension-3.1.0.zip
+安装包：bing-rewards-extension-3.2.0.zip
 提交页：https://partner.microsoft.com/dashboard/microsoftedge/overview
 隐私政策：https://github.com/GaoYanHai/bing-rewards-extension/blob/main/PRIVACY.md
 主页：https://github.com/GaoYanHai/bing-rewards-extension
