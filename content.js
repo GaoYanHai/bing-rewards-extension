@@ -1,7 +1,7 @@
-(async function rebangExtensionMain() {
+﻿(async function rebangExtensionMain() {
 "use strict";
 
-const rebangExtensionStore = await chrome.storage.local.get(null);
+const rebangExtensionStore = await BingAssistant.Storage.getAll();
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
@@ -29,7 +29,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         key === BingAssistant.KEYS.mobileDoneDate
     );
     if (changes[BingAssistant.KEYS.dailyKeywordPlan] || changes[BingAssistant.KEYS.blockedKeywords] || changes[BingAssistant.KEYS.selectedChannel] || changes[BingAssistant.KEYS.keywordShuffle]) {
-        try { sessionStorage.removeItem(getCurrentChannelKeywordsCacheKey()); } catch (error) {}
+        try { sessionStorage.removeItem(getCurrentChannelKeywordsCacheKey()); } catch (error) { BingAssistant.warn("clearSessionCache", error); }
         if (typeof initKeywords === "function" && $("#ext-keywords-list").length) initKeywords();
     }
     if (shouldRefreshBar && typeof updateMiniBar === "function") updateMiniBar();
@@ -47,7 +47,7 @@ function GM_getValue(key, defaultValue) {
 
 function GM_setValue(key, value) {
     rebangExtensionStore[key] = value;
-    chrome.storage.local.set({ [key]: value }).catch((error) => {
+    BingAssistant.Storage.set({ [key]: value }).catch((error) => {
         console.error(`保存设置失败: ${key}`, error);
     });
 }
@@ -424,10 +424,6 @@ GM_addStyle(`
     .b_dark .rebang-task { background: #2b2a29; color: #f3f2f1; }
     .b_dark .rebang-task.is-current { background: #1b3a52; }
 `);
-
-// 修复：不使用 this（严格模式下 this 为 undefined 会崩溃）
-// 将 $ 声明在顶层，确保所有函数都能访问
-var $ = jQuery.noConflict(true);
 
 // ==========================================
 // 工具函数与状态管理
@@ -904,7 +900,7 @@ function publishAssistantState() {
   } else {
     payload[BingAssistant.KEYS.loginState] = login;
   }
-  chrome.storage.local.set(payload).catch(() => {});
+  BingAssistant.Storage.set(payload);
 }
 
 function pushRunLog(event) {
@@ -1001,7 +997,7 @@ function doSearch(keyword) {
         try {
             nativeSetValue(box.$input[0], keyword);
             box.$input[0].dispatchEvent(new Event("input", { bubbles: true }));
-        } catch (e) {}
+        } catch (e) { BingAssistant.warn("nativeSetValue", e); }
         box.$btn[0].click();
         return true;
     }
@@ -1145,7 +1141,7 @@ function isMobileSearchMode() {
             sessionStorage.setItem("Rebang_SearchKind", "mobile");
             return true;
         }
-    } catch (_error) {}
+    } catch (error) { BingAssistant.warn("mobileSearchMode", error); }
     return false;
 }
 
@@ -1179,7 +1175,7 @@ function quizPageKind() {
     if (/poll|thisorthat|vote/.test(href.toLowerCase())) return "vote";
     try {
         if (document.querySelector(BingAssistant.TASK_SELECTORS.votePage)) return "vote";
-    } catch (error) {}
+    } catch (error) { BingAssistant.warn("quizPageDetect", error); }
     return "quiz";
 }
 
@@ -1191,7 +1187,7 @@ function quizPageNextStep(name) {
     let nodeCount = 0;
     try {
         nodeCount = document.querySelectorAll(BingAssistant.QUOTA_SELECTORS.quizCount).length;
-    } catch (error) {}
+    } catch (error) { BingAssistant.warn("quizCountDetect", error); }
     const bodyText = ((document.body && document.body.innerText) || "").slice(0, 4000);
     const total = BingAssistant.parseQuizQuestionTotal(bodyText, nodeCount);
     return BingAssistant.formatQuizNextStep(quizPageKind(), total, name || "");
@@ -1245,7 +1241,7 @@ function saveRewardsQuotasIfAny() {
         if (!parsed.pc && !parsed.mobile && !parsed.daily && !parsed.edge) return;
         const prev = BingAssistant.readQuotaSnapshot(rebangExtensionStore);
         setVal(BingAssistant.KEYS.quotaSnapshot, BingAssistant.mergeQuotaSnapshot(prev, parsed));
-    } catch (error) {}
+    } catch (error) { BingAssistant.warn("saveQuotaSnapshot", error); }
 }
 
 function isRewardsDashboard() {
@@ -1454,7 +1450,7 @@ function firstSafeQuizEl(selectors, extraFilter) {
     (Array.isArray(selectors) ? selectors : [selectors]).forEach((sel) => {
         try {
             document.querySelectorAll(sel).forEach((el) => nodes.push(el));
-        } catch (_error) {}
+        } catch (error) { BingAssistant.warn("querySelector", error); }
     });
     return nodes.find((el) => {
         if (!isVisibleElement(el) || isUnsafeQuizTarget(el)) return false;
@@ -1527,7 +1523,7 @@ function findQuizClickTarget() {
     optionSelectors.forEach((sel) => {
         try {
             document.querySelectorAll(sel).forEach((el) => options.push(el));
-        } catch (_error) {}
+        } catch (error) { BingAssistant.warn("quizOptionQuery", error); }
     });
     const clickable = options.filter((el) => isVisibleElement(el) && !isUnsafeQuizTarget(el) && isUsableQuizOption(el));
     if (clickable.length) {
@@ -1570,7 +1566,7 @@ function scheduleQuizAutoSolve(waiting) {
         quizSolveInFlight = false;
         if (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) return;
         if (hasQuizAssistGaveUp(waiting)) return;
-        try { target.click(); noteQuizAssistAttempt(); } catch (_error) {}
+        try { target.click(); noteQuizAssistAttempt(); } catch (error) { BingAssistant.warn("quizClick", error); }
     }, 800 + Math.floor(Math.random() * 900));
     return true;
 }
@@ -2259,7 +2255,7 @@ function checkAutoStart() {
             sessionStorage.removeItem("Rebang_SessionClicked");
             sessionStorage.removeItem("Rebang_LastTask");
             sessionStorage.removeItem("Rebang_LoggedSkip");
-        } catch (error) {}
+        } catch (error) { BingAssistant.warn("clearSessionKeys", error); }
         if (typeof initKeywords === "function" && $("#ext-keywords-list").length) initKeywords();
         if (typeof renderTaskListFromStore === "function") renderTaskListFromStore();
         if (typeof updateMiniBar === "function") updateMiniBar();
@@ -2402,7 +2398,6 @@ function initSearchControls() {
                 <div id="ext-keywords-list"></div>
             </div>
             <div id="ext-recent-logs"></div>
-            <input type="hidden" id="ext-autosearch-limit" value="${savedLimit}">
         </div>
     </div>`;
 
@@ -2424,7 +2419,6 @@ function initSearchControls() {
   let currentSearchCount = Number(getVal(getAutoSearchCountKey(), 0));
   let limitSearchCount = todaySearchLimit();
 
-  $("#ext-autosearch-limit").val(limitSearchCount);
   const savedWord = String(getVal(BingAssistant.KEYS.lastKeyword, "") || "").trim();
   if (savedWord) currentKeywordLabel = savedWord;
   updateMiniBar();

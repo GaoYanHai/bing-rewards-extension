@@ -164,7 +164,7 @@ function fill(store) {
 }
 
 async function save(partial) {
-  await chrome.storage.local.set(partial);
+  await A.Storage.set(partial);
 }
 
 scheduleEnabled.addEventListener("change", async () => {
@@ -412,7 +412,7 @@ document.getElementById("import-settings-file").addEventListener("change", async
 
 chrome.storage.onChanged.addListener(async (_changes, area) => {
   if (area !== "local") return;
-  fill(await chrome.storage.local.get(null));
+  fill(await A.Storage.getAll());
 });
 
-void chrome.storage.local.get(null).then(fill);
+void A.Storage.getAll().then(fill);

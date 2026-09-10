@@ -104,7 +104,7 @@ function fillHelp(model) {
 
 function showHelp() {
   fillHelp(A.buildViewModel({}));
-  chrome.storage.local.get(null).then((store) => fillHelp(A.buildViewModel(store)));
+  A.Storage.getAll().then((store) => fillHelp(A.buildViewModel(store)));
   viewRisk.hidden = true;
   viewMain.hidden = true;
   viewHelp.hidden = false;
@@ -268,7 +268,7 @@ function render(store) {
 }
 
 async function refresh() {
-  const store = await chrome.storage.local.get(null);
+  const store = await A.Storage.getAll();
   render(store);
 }
 

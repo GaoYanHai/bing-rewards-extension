@@ -1,10 +1,10 @@
-# Bing 积分助手
+﻿# Bing 积分助手
 
 面向 Edge / Chrome 的 Manifest V3 扩展。帮你在浏览器开着的时候完成今天的 Bing 搜索，并随时看清进度。
 
 对外名称：Bing 积分助手（Bing Rewards Assistant）
 
-当前版本：3.2.0
+当前版本：3.3.0
 
 商店：[在 Edge 加载项中获取](https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj)
 
@@ -83,6 +83,14 @@
 详见 [PRIVACY.md](PRIVACY.md)。设置、词库和进度都只存在本机，不会上传。
 
 ## 更新日志
+
+### 3.3.0 - 2026-09-10
+
+代码瘦身和稳定性提升。去掉了 87KB 的 jQuery 依赖，统一了存储层和错误日志。
+
+- 用内置轻量选择器替代 jQuery，包体积减少 87KB，权限不变
+- 所有存储操作走统一封装层，出错时会写入日志而不是静默丢失
+- 修复了以前完全吞掉的 18 处异常，排查问题更容易
 
 ### 3.2.0 - 2026-09-10
 
