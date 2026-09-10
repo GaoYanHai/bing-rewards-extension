@@ -61,6 +61,7 @@ function GM_addStyle(cssText) {
 
 // 跨天检测用：从持久存储读取上次检查日期，首次运行时初始化为今天
 const SCRIPT_LOAD_DATE = GM_getValue("Rebang_LastCheckDate", getLocalDateStr());
+let currentKeywordLabel = "-";
 
 // ==========================================
 // 样式定义区 (UI)
@@ -108,9 +109,6 @@ GM_addStyle(`
 
         /* 自动部分深色适配 */
         .auto-row { background-color: #3a3a3a; border-color: #444; }
-        /* 进度条深色适配 */
-        .search-progress-container { background: #444; }
-        .search-progress-bar { background: linear-gradient(90deg, #0078d4, #00b4d8, #0078d4); }
         /* 当前高亮项深色适配 */
         .keyword-link-current {
             background: linear-gradient(90deg, rgba(217, 83, 79, 0.2), rgba(217, 83, 79, 0.1), rgba(217, 83, 79, 0.2)) !important;
@@ -139,8 +137,6 @@ GM_addStyle(`
     .b_dark #rebang-widget select option { background-color: #444; color: #fff; }
     .b_dark #rebang-body::-webkit-scrollbar-thumb { background-color: #555; }
     .b_dark #rebang-body::-webkit-scrollbar-thumb:hover { background-color: #777; }
-    /* 进度条深色适配 */
-    .b_dark .search-progress-container { background: #444; }
     .b_dark .keyword-link-current {
         background: linear-gradient(90deg, rgba(217, 83, 79, 0.2), rgba(217, 83, 79, 0.1), rgba(217, 83, 79, 0.2)) !important;
     }
@@ -203,43 +199,6 @@ GM_addStyle(`
         text-decoration: line-through;
         opacity: 0.6;
     }
-    /* 搜索进度条 */
-    .search-progress-container {
-        margin: 8px 0;
-        background: #f0f0f0;
-        border-radius: 10px;
-        height: 8px;
-        overflow: hidden;
-        position: relative;
-    }
-    .search-progress-bar {
-        height: 100%;
-        background: linear-gradient(90deg, #0078d4, #00b4d8, #0078d4);
-        background-size: 200% 100%;
-        border-radius: 10px;
-        transition: width 0.5s ease;
-        animation: shimmer 2s linear infinite;
-    }
-    @keyframes shimmer {
-        0% { background-position: 200% 0; }
-        100% { background-position: -200% 0; }
-    }
-    /* 运行状态指示器 */
-    .running-indicator {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #107c10;
-        margin-right: 5px;
-        animation: blink 1s ease-in-out infinite;
-    }
-    @keyframes blink {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.3; }
-    }
-    .status-running { color: #107c10; font-weight: bold; }
-    .status-idle { color: #888; }
     #ex-user-msg { font-size: 12px; color: #d9534f; margin-top: 5px; display: block; min-height: 18px; }
     .checkbox-wrapper { display: flex; align-items: center; gap: 4px; }
     input[type=checkbox] { accent-color: #0078d4; }
@@ -789,8 +748,7 @@ function stopAutoSearch(msg, reason, reasonCode, extra) {
     setVal(autoSearchLockKey, "off");
     setVal(BingAssistant.KEYS.waitingUserTask, null);
     $("#ext-autosearch-lock").text("开始").removeClass("stop");
-    $("#ext-status-indicator").html('● <span class="status-idle">已停止</span>');
-    $("#ext-current-keyword").text("-");
+    currentKeywordLabel = "-";
     if (msg) showUserMessage(msg);
     updateMiniBar();
     chrome.runtime.sendMessage({
@@ -919,7 +877,7 @@ let lastPublishedState = "";
 function publishAssistantState() {
   const points = getBingPoints();
   const login = detectLoginState();
-  const keyword = ($("#ext-current-keyword").text() || "").replace(/^-$/, "").trim();
+  const keyword = String(currentKeywordLabel || "").replace(/^-$/, "").trim();
   const snapshot = JSON.stringify({
     points,
     login,
@@ -993,7 +951,6 @@ function updateMiniBar() {
     $("#rebang-mini-progress").text(`${track.label} ${count}/${limit}`);
     $("#ext-task-summary").text(`每日活动 ${model.dailyProgress}`);
   }
-  $("#ext-current-count").text(count);
   $("#rebang-dot").toggleClass("running", running && !paused);
   $("#rebang-dot").toggleClass("paused", paused);
   if (paused) {
@@ -1003,7 +960,7 @@ function updateMiniBar() {
   } else {
     $("#ext-autosearch-lock").text("开始").removeClass("stop");
   }
-  const keyword = ($("#ext-current-keyword").text() || "").trim();
+  const keyword = String(currentKeywordLabel || "").trim();
   const waiting = getVal(BingAssistant.KEYS.waitingUserTask, null);
   if (paused) $("#rebang-mini-current").text("已暂停");
   else if (!running && model.state === "failed") $("#rebang-mini-current").text(model.failShort || "已停止");
@@ -2059,15 +2016,7 @@ async function doAutoSearch() {
       }
   }
 
-  $("#ext-current-count").text(currentSearchCount);
-
-  // 【新增】更新进度条和状态指示器
   let limitSearchCount = track.limit;
-  let progressPercent = limitSearchCount > 0 ? Math.min((currentSearchCount / limitSearchCount) * 100, 100) : 100;
-  $("#search-progress-bar").css("width", progressPercent + "%");
-
-  // 更新状态指示器
-  $("#ext-status-indicator").html('<span class="running-indicator"></span> <span class="status-running">运行中</span>');
 
   // 每日搜索次数限制
   if (currentSearchCount >= limitSearchCount) {
@@ -2136,9 +2085,7 @@ async function doAutoSearch() {
     // 立即更新关键词列表的高亮位置（页面跳转前用户就能看到变化）
     renderKeywords(keywords);
 
-    // 【新增】更新当前关键词显示
-    let currentKw = truncateText(keywords[currentKeywordIndex - 1].title, 8);
-    $("#ext-current-keyword").text(currentKw);
+    currentKeywordLabel = truncateText(keywords[currentKeywordIndex - 1].title, 8);
     updateMiniBar();
 
     searchInFlight = true;
@@ -2456,10 +2403,6 @@ function initSearchControls() {
             </div>
             <div id="ext-recent-logs"></div>
             <input type="hidden" id="ext-autosearch-limit" value="${savedLimit}">
-            <span id="ext-current-count" hidden>0</span>
-            <span id="ext-current-keyword" hidden>-</span>
-            <span id="ext-status-indicator" hidden></span>
-            <div class="search-progress-container" hidden><div id="search-progress-bar" class="search-progress-bar" style="width:0%"></div></div>
         </div>
     </div>`;
 
@@ -2481,8 +2424,9 @@ function initSearchControls() {
   let currentSearchCount = Number(getVal(getAutoSearchCountKey(), 0));
   let limitSearchCount = todaySearchLimit();
 
-  $("#ext-current-count").text(currentSearchCount);
   $("#ext-autosearch-limit").val(limitSearchCount);
+  const savedWord = String(getVal(BingAssistant.KEYS.lastKeyword, "") || "").trim();
+  if (savedWord) currentKeywordLabel = savedWord;
   updateMiniBar();
 
   if (currentSearchCount >= limitSearchCount) { setVal(autoSearchLockKey, "off"); }
@@ -2495,7 +2439,7 @@ function initSearchControls() {
       initKeywords();
   });
   $("#ext-block-keyword").off("click.rebang").on("click.rebang", function () {
-      const word = (getVal(BingAssistant.KEYS.lastKeyword, "") || $("#ext-current-keyword").text() || "").trim();
+      const word = (getVal(BingAssistant.KEYS.lastKeyword, "") || currentKeywordLabel || "").trim();
       if (!word || word === "-") {
           showUserMessage("还没有当前搜索词");
           return;
