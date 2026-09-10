@@ -18,7 +18,7 @@ const BingAssistant = (() => {
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "3.0.1";
+  const PRODUCT_VERSION = "3.1.0";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -582,10 +582,10 @@ const BingAssistant = (() => {
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "3.0.1 迷你条停止按钮不再竖排",
+      title: "3.1.0 到点开始仍然安静",
       points: [
-        "迷你条点开始后，「停止」会横着排，不会被挤成竖字",
-        "3.0 的默认输入、定时不抢窗口都还在",
+        "定时开始后如果搜索标签没有动静，只会切到那个标签，不会把窗口抢到最前",
+        "3.0 的默认输入、定时不抢窗口、迷你条停止按钮横排都还在",
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
