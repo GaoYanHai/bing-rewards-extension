@@ -18,7 +18,7 @@
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "3.3.0";
+  const PRODUCT_VERSION = "3.3.1";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -582,10 +582,11 @@
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "3.3.0 更轻更快",
+      title: "3.3.1 界面更清爽",
       points: [
-        "去掉了 jQuery，扩展包轻了 87KB；功能和界面完全不变",
-        "存储层和错误处理更可靠，出错不再静默",
+        "设置页新增快速导航，常用项更容易找到",
+        "Popup 和设置页统一视觉层级，状态一眼看清",
+        "输入框和开关样式更清晰；功能和权限不变"
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };

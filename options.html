@@ -16,7 +16,16 @@
       </div>
     </header>
 
-    <section>
+    <nav class="page-nav" aria-label="设置快速导航">
+      <a href="#basic-settings">基础</a>
+      <a href="#history-settings">记录</a>
+      <a href="#keyword-settings">词库</a>
+      <a href="#log-settings">日志</a>
+      <a href="#advanced-settings">高级</a>
+      <a href="#danger-settings">风险</a>
+    </nav>
+
+    <section id="basic-settings">
       <h2>基础设置</h2>
       <label class="row">
         <span>自动开始</span>
@@ -89,7 +98,7 @@
       <p class="help">只展示页面上读到的剩余，不会自动点。请用 Microsoft Edge 自己完成。</p>
     </section>
 
-    <section>
+    <section id="history-settings">
       <h2>近 30 天</h2>
       <p id="chart-summary" class="help">还没有 30 天记录</p>
       <div id="month-status" class="month-grid"></div>
@@ -97,7 +106,7 @@
     </section>
 
 
-    <section>
+    <section id="keyword-settings">
       <h2>每日搜索词</h2>
       <label class="row">
         <span>词库</span>
@@ -135,7 +144,7 @@
       <div id="blocked-words" class="chips"></div>
     </section>
 
-    <section>
+    <section id="log-settings">
       <h2>今日日志</h2>
       <div id="log-list" class="log-list">还没有今天的日志。</div>
       <div class="toolbar">
@@ -143,7 +152,7 @@
       </div>
     </section>
 
-    <section>
+    <section id="advanced-settings">
       <h2>高级设置</h2>
       <label class="row">
         <span>本地备份</span>
@@ -192,7 +201,7 @@
       </label>
     </section>
 
-    <section class="danger">
+    <section class="danger" id="danger-settings">
       <h2>危险设置</h2>
       <label class="row">
         <span>启用危险设置</span>
@@ -238,9 +247,9 @@
       </div>
     </section>
 
-    <section>
+    <section id="about-settings">
       <h2>这个版本</h2>
-      <p id="whats-new-title">3.2.0 商店里也能安静用</p>
+      <p id="whats-new-title">3.3.1 界面更清爽</p>
       <ul id="whats-new-points">
         <li>商店用户也能用到安静开始：卡住了最多切到那个标签，不会把窗口抢到最前</li>
         <li>搜索页不再藏着脚本用的 hidden 状态；迷你条、换一批、拉黑都还在</li>

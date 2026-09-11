@@ -1,0 +1,15 @@
+{
+  "name": "bing-rewards-extension",
+  "version": "3.3.1",
+  "private": true,
+  "description": "Bing Rewards Assistant - Manifest V3 browser extension",
+  "scripts": {
+    "lint": "eslint background.js content.js shared.js popup.js options.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "vitest": "^2.0.0"
+  }
+}

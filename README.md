@@ -4,7 +4,7 @@
 
 对外名称：Bing 积分助手（Bing Rewards Assistant）
 
-当前版本：3.3.0
+当前版本：3.3.1
 
 商店：[在 Edge 加载项中获取](https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj)
 
@@ -83,6 +83,14 @@
 详见 [PRIVACY.md](PRIVACY.md)。设置、词库和进度都只存在本机，不会上传。
 
 ## 更新日志
+
+### 3.3.1 - 2026-09-11
+
+界面优化版。功能逻辑不变，重点让进度更清楚、设置更好找。
+
+- 设置页新增快速导航，滚动时会高亮当前区块
+- Popup 和设置页统一卡片、间距、输入框和开关样式
+- 危险设置保留独立视觉提示；权限和默认安全模式不变
 
 ### 3.3.0 - 2026-09-10
 

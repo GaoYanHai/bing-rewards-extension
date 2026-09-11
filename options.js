@@ -415,4 +415,23 @@ chrome.storage.onChanged.addListener(async (_changes, area) => {
   fill(await A.Storage.getAll());
 });
 
+const settingsSections = Array.from(document.querySelectorAll("main section[id]"));
+const settingsLinks = Array.from(document.querySelectorAll(".page-nav a[href^='#']"));
+const activeSection = settingsSections.find((section) => {
+  const rect = section.getBoundingClientRect();
+  return rect.top >= 0 && rect.top < window.innerHeight * 0.4;
+}) || settingsSections[0];
+const activeLink = settingsLinks.find((link) => link.hash === `#${activeSection && activeSection.id}`);
+if (activeLink) activeLink.classList.add("active");
+
+const sectionObserver = new IntersectionObserver((entries) => {
+  const visible = entries
+    .filter((entry) => entry.isIntersecting)
+    .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+  if (!visible) return;
+  settingsLinks.forEach((link) => link.classList.toggle("active", link.hash === `#${visible.target.id}`));
+}, { rootMargin: "-62px 0px -55% 0px", threshold: 0 });
+
+settingsSections.forEach((section) => sectionObserver.observe(section));
+
 void A.Storage.getAll().then(fill);
