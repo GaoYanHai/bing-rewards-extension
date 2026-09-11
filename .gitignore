@@ -8,5 +8,7 @@ Thumbs.db
 node_modules/
 package-lock.json
 
+store-listing.txt
+store/review-faq.txt
 *版本开发说明.txt
 产品整改报告.txt
