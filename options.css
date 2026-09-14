@@ -285,7 +285,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .month-cell.complete { background: rgba(16, 124, 16, 0.16); color: var(--ok); }
 .month-cell.failed { background: rgba(216, 59, 1, 0.12); color: var(--danger); }
-.month-cell.today { outline: 1px solid var(--accent); color: var(--fg); }
+.month-cell.today { outline: 1px solid var(--accent); }
+.month-cell.today:not(.complete):not(.failed) { color: var(--fg); }
 .month-cell.empty { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
 .month-bars { display: flex; align-items: flex-end; gap: 2px; height: 88px; margin: 5px 0 9px; }
 .month-bar {

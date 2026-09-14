@@ -82,20 +82,6 @@
         <span>完成后通知我</span>
         <input type="checkbox" id="notify-enabled" checked>
       </label>
-      <label class="row">
-        <span>移动搜索</span>
-        <strong id="mobile-quota-basic">还没打开过 Rewards 读取配额</strong>
-      </label>
-      <div class="toolbar">
-        <button id="mobile-done-btn" type="button">我已用手机做完</button>
-        <button id="mobile-undone-btn" type="button" hidden>取消标记</button>
-      </div>
-      <p class="help">默认只提醒，不自动执行。标记只对当天有效。真正执行要到下面的危险设置里打开。</p>
-      <label class="row">
-        <span>Edge 奖励</span>
-        <strong id="edge-quota-basic">还没读到</strong>
-      </label>
-      <p class="help">只展示页面上读到的剩余，不会自动点。请用 Microsoft Edge 自己完成。</p>
     </section>
 
     <section id="history-settings">
@@ -239,21 +225,17 @@
           <span>移动搜索次数</span>
           <input type="number" id="mobile-limit" min="0" max="80" step="1">
         </label>
-        <p class="help">若已从 Rewards 读到剩余，会优先用页面剩余。读不到才用这个数字。</p>
-        <label class="row">
-          <span>移动搜索配额</span>
-          <strong id="mobile-quota">未启用</strong>
-        </label>
+        <p class="help">电脑搜索做完后，会按这个次数用手机样式再搜。</p>
       </div>
     </section>
 
     <section id="about-settings">
       <h2>这个版本</h2>
-      <p id="whats-new-title">3.3.1 界面更清爽</p>
+      <p id="whats-new-title">3.3.2 去掉读不准的配额</p>
       <ul id="whats-new-points">
-        <li>商店用户也能用到安静开始：卡住了最多切到那个标签，不会把窗口抢到最前</li>
-        <li>搜索页不再藏着脚本用的 hidden 状态；迷你条、换一批、拉黑都还在</li>
-        <li>默认仍是安全模式，只做电脑搜索；权限和产品名不变</li>
+        <li>不再展示移动搜索配额和 Edge 奖励，避免一直显示读不到</li>
+        <li>设置页数字可以直接输入，不会被改回默认值</li>
+        <li>危险设置里的移动搜索仍按你填的次数执行</li>
       </ul>
     </section>
 

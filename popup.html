@@ -53,7 +53,7 @@
         </div>
         <div class="progress" aria-hidden="true"><i id="progress-bar"></i></div>
         <div id="whats-new" class="whats-new" hidden>
-          <span id="whats-new-title">3.3.1 界面更清爽</span>
+          <span id="whats-new-title">3.3.2 去掉读不准的配额</span>
           <span class="whats-new-actions">
             <button id="whats-new-more" class="link" type="button">看看</button>
             <button id="whats-new-dismiss" class="link" type="button">知道了</button>
@@ -67,10 +67,6 @@
           <button id="task-done" class="link" type="button">我点完了</button>
           <button id="task-skip" class="link" type="button">跳过这张</button>
           <button id="task-open" class="link" type="button">去处理</button>
-        </div>
-        <div id="mobile-actions" class="hint-actions mobile-actions" hidden>
-          <button id="mobile-done" class="link" type="button">我已用手机做完</button>
-          <button id="mobile-undone" class="link" type="button" hidden>取消标记</button>
         </div>
         <div id="log-box" class="log-box" hidden></div>
       </div>
@@ -87,16 +83,22 @@
         <img src="icons/icon32.png" alt="">
         <div>
           <h1>说明</h1>
-          <p id="help-version">版本 3.3.1</p>
+          <p id="help-version">版本 3.3.2</p>
         </div>
       </header>
-      <div class="card">
-        <p id="help-title">3.3.1 界面更清爽</p>
-        <ul id="help-points"></ul>
-      </div>
-      <div class="card">
-        <p>浏览器开着时才会运行。到点会自动开始；当时没开，下次打开会补做今天。</p>
-        <p class="fineprint">电脑关机、睡眠，或浏览器完全退出时，无法自己启动。自动搜索可能不符合 Microsoft Rewards 使用规则，请自行判断。</p>
+      <div class="help-scroll">
+        <div class="card help-card">
+          <p id="help-title" class="help-kicker">3.3.2 去掉读不准的配额</p>
+          <ul id="help-points"></ul>
+        </div>
+        <div class="card help-card">
+          <p class="help-kicker">使用时请记住</p>
+          <ul>
+            <li>浏览器开着时才会运行。到点会自动开始；当时没开，下次打开会补做今天。</li>
+            <li>电脑关机、睡眠，或浏览器完全退出时，无法自己启动。</li>
+            <li>自动搜索可能不符合 Microsoft Rewards 使用规则，请自行判断是否使用。</li>
+          </ul>
+        </div>
       </div>
       <button id="help-back" class="primary" type="button">返回</button>
     </section>

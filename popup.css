@@ -40,16 +40,61 @@ html, body {
   color: var(--fg);
   font: 13px/1.45 "Segoe UI", "Microsoft YaHei", sans-serif;
 }
-#app { display: flex; flex-direction: column; max-height: 560px; }
-.view { padding: 14px; }
-.view-main { display: flex; flex-direction: column; max-height: 560px; padding: 0; }
+html.help-open, html.help-open body {
+  width: 480px;
+  min-width: 480px;
+  height: 600px;
+  max-height: 600px;
+}
+#app {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: 560px;
+}
+.help-open #app {
+  width: 100%;
+  max-height: 600px;
+  height: 600px;
+}
+.view { display: none; padding: 14px; width: 100%; box-sizing: border-box; }
+.view:not([hidden]) { display: block; }
+.view-main { padding: 0; max-height: 560px; }
+.view-main:not([hidden]) { display: flex; flex-direction: column; }
 .popup-scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding: 14px 16px 10px;
 }
-.view-help { max-height: 560px; overflow-y: auto; }
+.view-help {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 18px;
+}
+.view-help:not([hidden]) { display: flex; flex-direction: column; }
+.view[hidden] { display: none !important; }
+.help-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+}
+.help-card {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.view-help .help-card p { font-weight: 400; font-size: 14px; line-height: 1.7; color: var(--fg); }
+.view-help .help-kicker { margin: 0 0 10px; font-size: 16px; font-weight: 650; line-height: 1.45; color: var(--fg); }
+.view-help ul { margin: 0; padding-left: 1.15em; color: var(--fg); font-size: 14px; line-height: 1.7; }
+.view-help li + li { margin-top: 10px; }
+.view-help .card .fineprint, .view-help .card p.fineprint { font-weight: 400; font-size: 13px; line-height: 1.65; color: var(--muted); }
+.view-help .primary { margin-top: 2px; flex: 0 0 auto; width: 100%; }
 .brand { display: flex; gap: 11px; align-items: center; margin-bottom: 14px; }
 .brand img {
   width: 36px;
@@ -211,10 +256,8 @@ footer {
 .week-cell.empty .week-dot { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
 .week-cell.today { outline: 1px solid var(--accent); color: var(--fg); }
 .week-cell.today .week-dot { background: var(--accent); }
+.week-cell.today.complete .week-dot { background: var(--ok); }
+.week-cell.today.failed .week-dot { background: var(--danger); }
 .streak-line { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
 .streak-line[hidden] { display: none; }
-.view-help ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
-.view-help .card p { font-weight: 650; }
-.view-help .card .fineprint, .view-help .card p.fineprint { font-weight: 400; }
-.mobile-actions { margin-top: 4px; }
-.mobile-actions[hidden] { display: none; }
+

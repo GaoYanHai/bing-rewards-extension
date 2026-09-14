@@ -8,7 +8,6 @@ const todayGoal = document.getElementById("today-goal");
 const weekendGoal = document.getElementById("weekend-goal");
 const searchLimit = document.getElementById("search-limit");
 const weekendSearchLimit = document.getElementById("weekend-search-limit");
-const mobileQuota = document.getElementById("mobile-quota");
 const missedRemind = document.getElementById("missed-remind");
 const notifyEnabled = document.getElementById("notify-enabled");
 const wordPack = document.getElementById("word-pack");
@@ -25,8 +24,6 @@ const catchupEnabled = document.getElementById("catchup-enabled");
 const catchupAsk = document.getElementById("catchup-ask");
 const mobileEnabled = document.getElementById("mobile-enabled");
 const mobileLimit = document.getElementById("mobile-limit");
-const mobileDoneBtn = document.getElementById("mobile-done-btn");
-const mobileUndoneBtn = document.getElementById("mobile-undone-btn");
 const dangerEnabled = document.getElementById("danger-enabled");
 const dangerConfirm = document.getElementById("danger-confirm");
 const dangerAck = document.getElementById("danger-ack");
@@ -68,6 +65,29 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+function isEditing(el) {
+  return !!(el && document.activeElement === el);
+}
+
+function setIfIdle(el, value, asCheckbox) {
+  if (!el || isEditing(el)) return;
+  if (asCheckbox) {
+    const next = !!value;
+    if (el.checked !== next) el.checked = next;
+    return;
+  }
+  const next = value == null ? "" : String(value);
+  if (el.value !== next) el.value = next;
+}
+
+function commitNumber(el, key, min, max, fallback) {
+  if (!el) return;
+  const num = Number(String(el.value || "").trim());
+  const value = Number.isFinite(num) ? Math.min(max, Math.max(min, Math.round(num))) : fallback;
+  el.value = String(value);
+  return save({ [key]: value });
+}
+
 function renderMonthChart(model) {
   const chart = model.monthChart || A.buildMonthChartModel({});
   const summary = document.getElementById("chart-summary");
@@ -95,32 +115,35 @@ function renderMonthChart(model) {
 
 function fill(store) {
   const model = A.buildViewModel(store);
-  scheduleEnabled.checked = model.schedule.enabled;
-  scheduleTime.value = model.schedule.enabled
-    ? A.formatClock(model.schedule.hour, model.schedule.minute)
-    : `${A.pad2(A.SUGGESTED_HOUR)}:${A.pad2(A.SUGGESTED_MINUTE)}`;
+  setIfIdle(scheduleEnabled, model.schedule.enabled, true);
+  setIfIdle(
+    scheduleTime,
+    model.schedule.enabled
+      ? A.formatClock(model.schedule.hour, model.schedule.minute)
+      : `${A.pad2(A.SUGGESTED_HOUR)}:${A.pad2(A.SUGGESTED_MINUTE)}`
+  );
   nextRun.textContent = model.schedule.enabled
     ? `下次启动：${model.nextRunLabel}`
     : `下次启动：未设置，建议${A.suggestedTimeLabel()}`;
-  todayGoal.value = model.weekdayGoal || model.goal;
-  weekendGoal.value = model.weekendGoal || A.WEEKEND_GOAL_SAME;
-  searchLimit.value = String(model.weekdayLimit || model.limit);
-  weekendSearchLimit.value = model.weekendSearchLimit === "" || model.weekendSearchLimit == null ? "" : String(model.weekendSearchLimit);
-  missedRemind.checked = model.missedRemindEnabled;
-  notifyEnabled.checked = model.notifyEnabled;
+  setIfIdle(todayGoal, model.weekdayGoal || model.goal);
+  setIfIdle(weekendGoal, model.weekendGoal || A.WEEKEND_GOAL_SAME);
+  setIfIdle(searchLimit, model.weekdayLimit || model.limit);
+  setIfIdle(weekendSearchLimit, model.weekendSearchLimit === "" || model.weekendSearchLimit == null ? "" : model.weekendSearchLimit);
+  setIfIdle(missedRemind, model.missedRemindEnabled, true);
+  setIfIdle(notifyEnabled, model.notifyEnabled, true);
   const copy = model.whatsNew || A.whatsNewCopy();
   const titleEl = document.getElementById("whats-new-title");
   const pointsEl = document.getElementById("whats-new-points");
   if (titleEl) titleEl.textContent = copy.title;
   if (pointsEl) pointsEl.innerHTML = (copy.points || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
-  wordPack.value = model.wordPack;
-  if (weekendWordPack) weekendWordPack.value = model.weekendWordPack || A.WEEKEND_WORD_PACK_SAME;
-  customKeywords.value = model.customKeywords;
-  noGainLimit.value = String(model.noGainLimit);
-  dailyRetries.value = String(model.dailyRetries);
-  catchupEnabled.checked = model.catchUpEnabled;
-  catchupAsk.checked = model.catchUpAsk;
-  dangerEnabled.checked = model.dangerEnabled;
+  setIfIdle(wordPack, model.wordPack);
+  if (weekendWordPack) setIfIdle(weekendWordPack, model.weekendWordPack || A.WEEKEND_WORD_PACK_SAME);
+  setIfIdle(customKeywords, model.customKeywords);
+  setIfIdle(noGainLimit, model.noGainLimit);
+  setIfIdle(dailyRetries, model.dailyRetries);
+  setIfIdle(catchupEnabled, model.catchUpEnabled, true);
+  setIfIdle(catchupAsk, model.catchUpAsk, true);
+  setIfIdle(dangerEnabled, model.dangerEnabled, true);
   if (model.dangerEnabled) {
     dangerConfirm.hidden = true;
     dangerAck.checked = false;
@@ -129,23 +152,15 @@ function fill(store) {
   } else if (dangerConfirm.hidden) {
     dangerBody.hidden = true;
   }
-  highRiskEnabled.checked = model.highRiskTasksEnabled;
-  quizAssist.checked = model.quizAssistEnabled;
-  mobileEnabled.checked = model.mobileEnabled;
-  repeatRule.value = model.repeatRule;
-  intervalMin.value = String(model.intervalMin);
-  intervalMax.value = String(model.intervalMax);
-  simulateTyping.checked = model.simulateTyping;
-  pauseWhenBusy.checked = model.pauseWhenBusy;
-  const mobileLine = model.mobileQuotaLine || "还没打开过 Rewards 读取配额";
-  if (mobileQuota) mobileQuota.textContent = mobileLine;
-  const mobileBasic = document.getElementById("mobile-quota-basic");
-  if (mobileBasic) mobileBasic.textContent = mobileLine;
-  const edgeBasic = document.getElementById("edge-quota-basic");
-  if (edgeBasic) edgeBasic.textContent = model.edgeQuotaLine || "还没读到";
-  if (mobileLimit) mobileLimit.value = String(A.readNumber(store, A.KEYS.mobileSearchLimit, A.DEFAULT_MOBILE_LIMIT));
-  if (mobileDoneBtn) mobileDoneBtn.hidden = !!model.mobileDoneToday;
-  if (mobileUndoneBtn) mobileUndoneBtn.hidden = !model.mobileDoneToday;
+  setIfIdle(highRiskEnabled, model.highRiskTasksEnabled, true);
+  setIfIdle(quizAssist, model.quizAssistEnabled, true);
+  setIfIdle(mobileEnabled, model.mobileEnabled, true);
+  setIfIdle(repeatRule, model.repeatRule);
+  setIfIdle(intervalMin, model.intervalMin);
+  setIfIdle(intervalMax, model.intervalMax);
+  setIfIdle(simulateTyping, model.simulateTyping, true);
+  setIfIdle(pauseWhenBusy, model.pauseWhenBusy, true);
+  if (mobileLimit) setIfIdle(mobileLimit, A.readNumber(store, A.KEYS.mobileSearchLimit, A.DEFAULT_MOBILE_LIMIT));
   renderMonthChart(model);
   keywordNote.textContent = model.keywordPlan?.note || A.KEYWORD_NOTE;
   if (model.keywordPlan?.fallback) {
@@ -215,9 +230,7 @@ scheduleTime.addEventListener("change", async () => {
 todayGoal.addEventListener("change", () => send("SET_TODAY_GOAL", { goal: todayGoal.value }));
 weekendGoal.addEventListener("change", () => save({ [A.KEYS.weekendGoal]: A.normalizeWeekendGoal(weekendGoal.value) }));
 searchLimit.addEventListener("change", () => {
-  const value = Math.max(1, Number(searchLimit.value) || A.DEFAULT_SEARCH_LIMIT);
-  searchLimit.value = String(value);
-  void save({ [A.KEYS.limitSearchCount]: value });
+  void commitNumber(searchLimit, A.KEYS.limitSearchCount, 1, 150, A.DEFAULT_SEARCH_LIMIT);
 });
 weekendSearchLimit.addEventListener("change", () => {
   const raw = String(weekendSearchLimit.value || "").trim();
@@ -226,7 +239,8 @@ weekendSearchLimit.addEventListener("change", () => {
     void save({ [A.KEYS.weekendSearchLimit]: "" });
     return;
   }
-  const value = Math.max(1, Number(raw) || A.DEFAULT_SEARCH_LIMIT);
+  const num = Number(raw);
+  const value = Number.isFinite(num) ? Math.min(150, Math.max(1, Math.round(num))) : A.DEFAULT_SEARCH_LIMIT;
   weekendSearchLimit.value = String(value);
   void save({ [A.KEYS.weekendSearchLimit]: value });
 });
@@ -243,14 +257,10 @@ if (weekendWordPack) {
   });
 }
 noGainLimit.addEventListener("change", () => {
-  const value = Math.max(3, Number(noGainLimit.value) || A.DEFAULT_NO_GAIN_LIMIT);
-  noGainLimit.value = String(value);
-  void save({ [A.KEYS.maxNoGainLimit]: value });
+  void commitNumber(noGainLimit, A.KEYS.maxNoGainLimit, 3, 30, A.DEFAULT_NO_GAIN_LIMIT);
 });
 dailyRetries.addEventListener("change", () => {
-  const value = Math.max(1, Number(dailyRetries.value) || A.DEFAULT_DAILY_RETRIES);
-  dailyRetries.value = String(value);
-  void save({ [A.KEYS.dailyTaskMaxRetries]: value });
+  void commitNumber(dailyRetries, A.KEYS.dailyTaskMaxRetries, 1, 10, A.DEFAULT_DAILY_RETRIES);
 });
 catchupEnabled.addEventListener("change", () => save({ [A.KEYS.catchUpEnabled]: catchupEnabled.checked }));
 catchupAsk.addEventListener("change", () => save({ [A.KEYS.catchUpAsk]: catchupAsk.checked }));
@@ -316,16 +326,8 @@ mobileEnabled.addEventListener("change", () => {
 });
 if (mobileLimit) {
   mobileLimit.addEventListener("change", () => {
-    const value = Math.max(0, Math.round(Number(mobileLimit.value) || A.DEFAULT_MOBILE_LIMIT));
-    mobileLimit.value = String(value);
-    void save({ [A.KEYS.mobileSearchLimit]: value });
+    void commitNumber(mobileLimit, A.KEYS.mobileSearchLimit, 0, 80, A.DEFAULT_MOBILE_LIMIT);
   });
-}
-if (mobileDoneBtn) {
-  mobileDoneBtn.addEventListener("click", () => send("MARK_MOBILE_DONE"));
-}
-if (mobileUndoneBtn) {
-  mobileUndoneBtn.addEventListener("click", () => send("UNMARK_MOBILE_DONE"));
 }
 
 document.getElementById("save-custom").addEventListener("click", async () => {

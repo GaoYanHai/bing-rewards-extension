@@ -18,7 +18,7 @@
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "3.3.1";
+  const PRODUCT_VERSION = "3.3.2";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -108,10 +108,10 @@
   };
 
   const QUOTA_SELECTORS = {
-    cards: "mee-card, mee-rewards-daily-set-item-content, mee-rewards-item, .c-card-content, .rewards-card, .ds-card, .promo-card, mee-rewards-point-breakdown, .pointsBreakdown, .pointsBreakdownCard, [class*='pointsBreakdown'], [class*='earnPoints'], [data-bi-id*='search'], [data-bi-id*='edge']",
-    breakdown: "#pointsBreakdown, .pointsBreakdown, mee-rewards-points-breakdown, .points-breakdown, mee-rewards-user-status-banner, mee-rewards-user-status, [class*='points-breakdown'], [class*='bonus']",
+    cards: "mee-card, mee-rewards-daily-set-item-content, mee-rewards-item, mee-rewards-counter-animation, mee-progress-bar, .c-card-content, .rewards-card, .ds-card, .promo-card, mee-rewards-point-breakdown, .pointsBreakdown, .pointsBreakdownCard, [class*='pointsBreakdown'], [class*='earnPoints'], [class*='ProgressBar'], [role='progressbar'], progress, [data-bi-id*='search'], [data-bi-id*='pc'], [data-bi-id*='mobile'], [data-bi-id*='edge'], [data-bi-id*='breakdown']",
+    breakdown: "#pointsBreakdown, .pointsBreakdown, mee-rewards-points-breakdown, mee-rewards-point-breakdown, .points-breakdown, mee-rewards-user-status-banner, mee-rewards-user-status, [class*='points-breakdown'], [class*='Breakdown'], [class*='bonus']",
     dailySection: "mee-rewards-daily-set-section, #daily-sets, .daily-set-section, .dailySet, [id*='dailySet'], [id*='daily-set'], [class*='dailySet']",
-    labeled: "[aria-label*='search' i], [aria-label*='Search'], [aria-label*='搜索'], [aria-label*='Daily'], [aria-label*='每日'], [aria-label*='Edge'], [aria-label*='Microsoft Edge'], [aria-label*='edge bonus' i], [aria-label*='奖励'], [aria-label*='PC'], [aria-label*='Mobile'], [title*='search' i], [title*='搜索']",
+    labeled: "[aria-label*='search' i], [aria-label*='Search'], [aria-label*='搜索'], [aria-label*='Daily'], [aria-label*='每日'], [aria-label*='Edge'], [aria-label*='Microsoft Edge'], [aria-label*='edge bonus' i], [aria-label*='奖励'], [aria-label*='PC'], [aria-label*='Mobile'], [aria-label*='bing app' i], [aria-label*='手机'], [aria-label*='电脑'], [title*='search' i], [title*='搜索']",
     quizCount: ".rqQ, .rqQuestion, .wk_Circle, .TriviaOverlayData li, [aria-label*='Question']"
   };
 
@@ -414,15 +414,15 @@
       const dateStr = localDateString(date);
       const record = records.get(dateStr);
       let status = "empty";
-      if (dateStr === today) status = "today";
-      else if (record && record.status === "complete") status = "complete";
+      if (record && record.status === "complete") status = "complete";
       else if (record && record.status === "failed") status = "failed";
       else if (record) status = "incomplete";
+      else if (dateStr === today) status = "today";
       cells.push({
         date: dateStr,
         day: date.getDate(),
         weekday: weekdayShort(date).replace("周", ""),
-        status,
+        status: dateStr === today && status !== "today" ? `${status} today` : status,
         title: `${date.getMonth() + 1}月${date.getDate()}日 ${recordStatusLabel(status)}`
       });
     }
@@ -565,7 +565,7 @@
     if (!model) return "点继续会接着今天的进度，不会从头搜。";
     if (isLoginFailCode(model.failReasonCode)) return model.failMessage || "请确认微软账号后继续今天的进度。";
     if (isMobileFailCode(model.failReasonCode)) {
-      return model.failMessage || "可以用手机 Bing 做完，或点「我已用手机做完」。";
+      return model.failMessage || "可以用手机 Bing 做完。";
     }
     if (model.count >= model.limit && model.mobilePending) {
       return "电脑搜索已满，继续会去做移动搜索。";
@@ -582,11 +582,11 @@
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "3.3.1 界面更清爽",
+      title: "3.3.2 去掉读不准的配额",
       points: [
-        "设置页新增快速导航，常用项更容易找到",
-        "Popup 和设置页统一视觉层级，状态一眼看清",
-        "输入框和开关样式更清晰；功能和权限不变"
+        "不再展示移动搜索配额和 Edge 奖励，避免一直显示读不到",
+        "设置页数字可以直接输入，不会被改回默认值",
+        "危险设置里的移动搜索仍按你填的次数执行",
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
@@ -813,22 +813,22 @@
     if (code === FAIL_CODES.MOBILE_NO_GAIN) {
       return {
         short: "这次移动搜索没有加分",
-        next: "可以用手机 Bing 做完，或点「我已用手机做完」",
-        message: "这次移动搜索没有加分，已停止。可以用手机 Bing 做完，或点「我已用手机做完」。"
+        next: "可以用手机 Bing 做完",
+        message: "这次移动搜索没有加分，已停止。可以用手机 Bing 做完。"
       };
     }
     if (code === FAIL_CODES.MOBILE_POINTS) {
       return {
         short: "读不到这次移动搜索的积分",
-        next: "可以用手机 Bing 做完，或点「我已用手机做完」",
-        message: "这次移动搜索读不到积分，已停止。可以用手机 Bing 做完，或点「我已用手机做完」。"
+        next: "可以用手机 Bing 做完",
+        message: "这次移动搜索读不到积分，已停止。可以用手机 Bing 做完。"
       };
     }
     if (code === FAIL_CODES.MOBILE_HEADER) {
       return {
         short: "没法做移动搜索",
-        next: "请用手机 Bing 完成，或点「我已用手机做完」",
-        message: "没法用手机样式做这次移动搜索，已停止。请用手机 Bing 完成，或点「我已用手机做完」。"
+        next: "请用手机 Bing 完成",
+        message: "没法用手机样式做这次移动搜索，已停止。请用手机 Bing 完成。"
       };
     }
     if (code === FAIL_CODES.RISK) {
@@ -900,14 +900,27 @@
     return { kind: TASK_KIND.UNKNOWN, status: TASK_STATUS.UNKNOWN, reason: "页面改版" };
   }
 
+  function isRewardsPage(loc) {
+    const hostname = String((loc && loc.hostname) || "").toLowerCase();
+    const pathname = String((loc && loc.pathname) || "/");
+    if (hostname === "rewards.bing.com" || hostname.endsWith(".rewards.bing.com")) return true;
+    return /(^|\.)bing\.com$/.test(hostname) && /^\/rewards(\/|$)/i.test(pathname);
+  }
+
   function isRewardsDashboardPath(pathname) {
     const path = String(pathname || "/").replace(/\/+$/, "") || "/";
-    return path === "/" || path === "/dashboard" || path === "/welcome" || path === "/status";
+    if (path === "/rewards") return true;
+    const rest = path.replace(/^\/rewards(?=\/)/, "") || "/";
+    return rest === "/" || rest === "/dashboard" || rest === "/welcome" || rest === "/status" || rest === "/earn";
   }
 
   function isQuizOrVotePage(loc, root) {
-    const href = `${(loc && loc.pathname) || ""} ${(loc && loc.search) || ""} ${(loc && loc.href) || ""}`;
-    if (/quiz|trivia|poll|thisorthat|rewardsquiz/i.test(href)) return true;
+    const pathname = (loc && loc.pathname) || "";
+    const search = (loc && loc.search) || "";
+    const href = `${pathname} ${search} ${(loc && loc.href) || ""}`;
+    const urlLooksLikeQuiz = /quiz|trivia|poll|thisorthat|rewardsquiz/i.test(href);
+    if (isRewardsDashboardPath(pathname) && !urlLooksLikeQuiz) return false;
+    if (urlLooksLikeQuiz) return true;
     try {
       if (root && root.querySelector && TASK_SELECTORS.quizPage && root.querySelector(TASK_SELECTORS.quizPage)) return true;
       if (root && root.querySelector && TASK_SELECTORS.votePage && root.querySelector(TASK_SELECTORS.votePage)) return true;
@@ -915,13 +928,26 @@
     return false;
   }
 
+  function isRewardsVisitUrl(url) {
+    try {
+      const loc = new URL(String(url || ""));
+      if (isRewardsPage(loc)) return true;
+      const host = loc.hostname.toLowerCase();
+      if ((host === "account.microsoft.com" || host === "www.microsoft.com" || host === "microsoft.com") && /\/rewards(\/|$)/i.test(loc.pathname)) return true;
+      if (host === "rewards.microsoft.com" || host.endsWith(".rewards.microsoft.com")) return true;
+      return false;
+    } catch (_error) {
+      return false;
+    }
+  }
+
   function classifyQuotaKind(text) {
     const t = String(text || "").toLowerCase().replace(/\s+/g, " ");
     const edge = /search on microsoft edge|search using microsoft edge|microsoft edge bonus|edge bonus|edge search bonus|edge 奖励|通过\s*microsoft\s*edge|在\s*microsoft\s*edge|使用\s*microsoft\s*edge|edge 上搜索|earn .{0,40}microsoft edge/.test(t);
-    const mobile = /mobile search(?:es)?|移动(?:设备)?搜索|手机搜索|via mobile|bing mobile|search on mobile|在移动设备上搜索|在手机上搜索|移动端搜索|on your phone/.test(t);
-    const pc = /pc search(?:es)?|desktop search(?:es)?|computer search(?:es)?|电脑搜索|电脑上搜索|在电脑上搜索|search on (?:the )?pc/.test(t)
-      || (/search on bing/.test(t) && !mobile && !edge);
-    const daily = /daily set|每日任务|今日任务|daily check|每日活动|daily activities|today's daily set/.test(t);
+    const mobile = /mobile search(?:es)?|mobilesearch|mobile_search|bing app(?: search(?:es)?)?|search(?:es)? (?:on|via) (?:the )?bing app|必应应用搜索|bing 应用搜索|移动(?:设备)?(?:上的)?搜索|手机(?:必应)?搜索|via mobile|bing mobile|search on mobile|在移动设备上搜索|在手机上搜索|移动端搜索|on your phone|on the bing app/.test(t);
+    const pc = /pc search(?:es)?|pcsearch|pc_search|desktop search(?:es)?|computer search(?:es)?|电脑(?:上的)?搜索|电脑上搜索|在电脑上搜索|bingsearch|search on (?:the )?(?:pc|computer|desktop)/.test(t)
+      || ((/search on bing|bing 搜索|必应搜索/.test(t) || t === "bing search") && !mobile && !edge);
+    const daily = /daily set|每日任务|今日任务|daily check|每日活动|daily activities|today's daily set|dailyoffer/.test(t);
     const hits = [];
     if (edge) hits.push("edge");
     if (mobile) hits.push("mobile");
@@ -995,7 +1021,7 @@
       const trimmed = String(value || "").replace(/[ \t\u00a0]+/g, " ").trim();
       if (trimmed) chunks.push(trimmed);
     };
-    const splitLabels = /(?=\b(?:pc search(?:es)?|desktop search(?:es)?|computer search(?:es)?|mobile search(?:es)?|daily set|daily activities|search on microsoft edge|microsoft edge bonus|edge bonus|edge search bonus)|(?:电脑搜索|电脑上搜索|在电脑上搜索|移动设备搜索|移动搜索|手机搜索|每日任务|今日任务|每日活动|edge 奖励|通过\s*microsoft\s*edge))/i;
+    const splitLabels = /(?=\b(?:pc search(?:es)?|desktop search(?:es)?|computer search(?:es)?|mobile search(?:es)?|bing app(?: search(?:es)?)?|daily set|daily activities|search on microsoft edge|microsoft edge bonus|edge bonus|edge search bonus)|(?:电脑(?:上的)?搜索|电脑上搜索|在电脑上搜索|移动设备(?:上的)?搜索|移动搜索|手机(?:必应)?搜索|必应应用搜索|每日任务|今日任务|每日活动|edge 奖励|通过\s*microsoft\s*edge))/i;
     (Array.isArray(cardTexts) ? cardTexts : [cardTexts]).forEach((text) => {
       String(text || "").split(/[\n\r]+/).forEach((line) => {
         line.split(splitLabels).forEach(push);
@@ -1023,12 +1049,21 @@
     for (let i = 0; i < chunks.length; i++) {
       const kind = classifyQuotaKind(chunks[i]);
       if (!kind || result[kind]) continue;
-      assign(kind, parseQuotaValue(chunks[i + 1] || "", kind) || parseQuotaValue(chunks[i + 2] || "", kind));
+      const next = chunks[i + 1] || "";
+      const after = chunks[i + 2] || "";
+      const third = chunks[i + 3] || "";
+      assign(kind,
+        parseQuotaValue(next, kind)
+        || parseQuotaValue(after, kind)
+        || parseQuotaValue(`${next}/${after}`, kind)
+        || parseQuotaValue(`${next} ${after} ${third}`, kind)
+        || parseQuotaValue(`${chunks[i]} ${next} ${after}`, kind)
+      );
     }
     const blob = chunks.join(" \n ");
     const labels = [
-      ["mobile", /mobile search(?:es)?|移动(?:设备)?搜索|手机搜索|在移动设备上搜索|在手机上搜索|via mobile|search on mobile/i],
-      ["pc", /pc search(?:es)?|desktop search(?:es)?|computer search(?:es)?|电脑搜索|在电脑上搜索|电脑上搜索|search on (?:the )?pc/i],
+      ["mobile", /mobile search(?:es)?|bing app(?: search(?:es)?)?|移动(?:设备)?(?:上的)?搜索|手机(?:必应)?搜索|必应应用搜索|在移动设备上搜索|在手机上搜索|via mobile|search on mobile/i],
+      ["pc", /pc search(?:es)?|desktop search(?:es)?|computer search(?:es)?|电脑(?:上的)?搜索|在电脑上搜索|电脑上搜索|search on (?:the )?(?:pc|computer|desktop)/i],
       ["daily", /daily set|每日任务|今日任务|每日活动|daily activities|today's daily set/i],
       ["edge", /search on microsoft edge|microsoft edge bonus|edge bonus|edge search bonus|edge 奖励|通过\s*microsoft\s*edge|search using microsoft edge/i]
     ];
@@ -1036,9 +1071,129 @@
       if (result[kind]) return;
       const match = re.exec(blob);
       if (!match) return;
-      assign(kind, parseQuotaValue(blob.slice(match.index, match.index + 96), kind));
+      assign(kind, parseQuotaValue(blob.slice(match.index, match.index + 120), kind));
     });
     return result;
+  }
+
+  function firstQuotaNumber(...values) {
+    for (const value of values) {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const nested = firstQuotaNumber(value.current, value.now, value.value, value.count);
+        if (nested != null) return nested;
+      }
+      const num = Number(value);
+      if (Number.isFinite(num)) return num;
+    }
+    return null;
+  }
+
+  function pairFromProgressFields(obj, kind) {
+    if (!obj || typeof obj !== "object") return null;
+    const total = firstQuotaNumber(
+      obj.max, obj.pointProgressMax, obj.maxPoints, obj.total, obj.progressMax,
+      obj.completedMax, obj.maxValue, obj.originalMax, obj.ariaValueMax
+    );
+    let current = firstQuotaNumber(
+      obj.progress, obj.pointProgress, obj.progressCurrent, obj.completedAmount,
+      obj.current, obj.completed, obj.value, obj.now, obj.ariaValueNow
+    );
+    if (current == null && obj.maxPoints != null) current = firstQuotaNumber(obj.points);
+    if (current == null && total != null && obj.isCompleted) current = total;
+    if (current == null || total == null) return null;
+    return normalizeQuotaPair(current, total, kind);
+  }
+
+  function counterList(value) {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") return [value];
+    return [];
+  }
+
+  function parseRewardsDashboardData(data) {
+    const result = { pc: null, mobile: null, daily: null, edge: null, mobileUnavailable: false };
+    const assign = (kind, pair) => {
+      if (!kind || !pair || result[kind]) return;
+      result[kind] = pair;
+    };
+    const seen = new Set();
+    const visit = (obj) => {
+      if (!obj || typeof obj !== "object") return;
+      if (obj.pointsCounters && typeof obj.pointsCounters === "object") visit(obj.pointsCounters);
+      if (obj.userStatus && typeof obj.userStatus === "object") visit(obj.userStatus);
+      if (obj.counters && typeof obj.counters === "object") visit(obj.counters);
+      if (obj.pc && typeof obj.pc === "object") assign("pc", pairFromProgressFields(obj.pc, "pc"));
+      if (Object.prototype.hasOwnProperty.call(obj, "mobile")) {
+        if (obj.mobile && typeof obj.mobile === "object") assign("mobile", pairFromProgressFields(obj.mobile, "mobile"));
+        else if ((obj.pc || obj.totalPoints != null || obj.dailyOffer != null) && !result.mobile) result.mobileUnavailable = true;
+      }
+      counterList(obj.pcSearch).forEach((item, index) => {
+        const label = `${item && (item.name || item.title || "")} ${index === 1 ? "edge" : "pc"}`;
+        const kind = classifyQuotaKind(label) || (index === 1 ? "edge" : "pc");
+        assign(kind, pairFromProgressFields(item, kind));
+      });
+      counterList(obj.mobileSearch).forEach((item) => assign("mobile", pairFromProgressFields(item, "mobile")));
+      counterList(obj.activityAndQuiz).forEach((item) => assign("daily", pairFromProgressFields(item, "daily")));
+      counterList(obj.activities).forEach((item) => {
+        if (!item || typeof item !== "object") return;
+        const kind = classifyQuotaKind([item.activity, item.title, item.name, item.id].filter(Boolean).join(" "));
+        assign(kind, pairFromProgressFields(item, kind));
+      });
+      if (obj.quest && typeof obj.quest === "object") visit(obj.quest);
+      const label = [obj.name, obj.title, obj.id, obj.type, obj.activity, obj.key, obj.instrument, obj.hash, obj.offerId, obj.destinationType, obj.description].filter(Boolean).join(" ");
+      assign(classifyQuotaKind(label), pairFromProgressFields(obj, classifyQuotaKind(label)));
+    };
+    const walk = (value, depth) => {
+      if (!value || typeof value !== "object" || depth > 12 || seen.size > 4000 || seen.has(value)) return;
+      seen.add(value);
+      visit(value);
+      if (Array.isArray(value)) {
+        value.slice(0, 80).forEach((item) => walk(item, depth + 1));
+        return;
+      }
+      Object.keys(value).slice(0, 100).forEach((key) => walk(value[key], depth + 1));
+    };
+    walk(data, 0);
+    if (result.mobile) result.mobileUnavailable = false;
+    return result;
+  }
+
+  function parseJsonIfQuota(text) {
+    const raw = String(text || "").trim();
+    if (!raw || raw.length > 2000000) return null;
+    const tryParse = (value) => {
+      if (!value) return null;
+      if (typeof value === "string") {
+        try { return tryParse(JSON.parse(value)); } catch (_error) { return null; }
+      }
+      if (typeof value !== "object") return null;
+      const parsed = parseRewardsDashboardData(value);
+      if (parsed.pc || parsed.mobile || parsed.daily || parsed.edge || parsed.mobileUnavailable) return value;
+      return null;
+    };
+    const direct = tryParse(raw);
+    if (direct) return direct;
+    const markers = ["pointsCounters", "mobileSearch", "pcSearch", "pointProgressMax", "\"mobile\":"];
+    for (const marker of markers) {
+      const idx = raw.indexOf(marker);
+      if (idx < 0) continue;
+      const start = raw.lastIndexOf("{", idx);
+      if (start < 0) continue;
+      let depth = 0;
+      for (let i = start; i < Math.min(raw.length, start + 200000); i++) {
+        const ch = raw[i];
+        if (ch === "{") depth += 1;
+        else if (ch === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            const hit = tryParse(raw.slice(start, i + 1));
+            if (hit) return hit;
+            break;
+          }
+        }
+      }
+    }
+    return null;
   }
 
   function readQuotaSnapshot(store, now = new Date()) {
@@ -1053,28 +1208,25 @@
     const base = prev && prev.date === date ? prev : {};
     return {
       date,
+      seen: true,
       pc: (next && next.pc) || base.pc || null,
-      mobile: (next && next.mobile) || base.mobile || null,
+      mobile: null,
       daily: (next && next.daily) || base.daily || null,
-      edge: (next && next.edge) || base.edge || null,
+      edge: null,
+      mobileUnavailable: false,
       at: Date.now()
     };
   }
 
   function isMobileDoneToday(store, now = new Date()) {
-    return String((store && store[KEYS.mobileDoneDate]) || "") === localDateString(now);
+    return String((store && store[KEYS.mobileDoneDate]) || '') === localDateString(now);
   }
 
   function allowsMobileSearch(store) {
     return isDangerEnabled(store) && store[KEYS.mobileSearchEnabled] === true;
   }
 
-  function effectiveMobileLimit(store, now = new Date()) {
-    const quota = readQuotaSnapshot(store, now);
-    const done = readNumber(store, dailyMobileCountKey(now), 0);
-    if (quota && quota.mobile && Number.isFinite(Number(quota.mobile.remaining))) {
-      return Math.max(done, done + Math.max(0, Math.round(Number(quota.mobile.remaining))));
-    }
+  function effectiveMobileLimit(store) {
     return Math.max(0, readNumber(store, KEYS.mobileSearchLimit, DEFAULT_MOBILE_LIMIT));
   }
 
@@ -1092,12 +1244,11 @@
     return `页面显示还剩 ${quota.pc.remaining} 次`;
   }
 
-  function formatMobileHint(quota, store, now = new Date()) {
-    if (isMobileDoneToday(store, now)) return "你已标记今天用手机做完";
-    if (!quota || !quota.mobile || quota.mobile.remaining == null) return "";
-    if (quota.mobile.remaining <= 0) return "移动搜索今日已满";
-    if (allowsMobileSearch(store)) return `移动搜索还剩 ${quota.mobile.remaining} 次`;
-    return `移动搜索还剩 ${quota.mobile.remaining} 次，请用手机 Bing 完成`;
+
+  function formatMobileHint(store, now = new Date()) {
+    if (!allowsMobileSearch(store) || !shouldRunMobileSearch(store, now)) return "";
+    const remain = Math.max(0, effectiveMobileLimit(store) - readNumber(store, dailyMobileCountKey(now), 0));
+    return remain > 0 ? `还将用手机样式再搜 ${remain} 次` : "";
   }
 
   function formatDailyHint(quota) {
@@ -1105,45 +1256,18 @@
     return `每日活动还剩 ${quota.daily.remaining} 张`;
   }
 
-  function formatMobileQuotaLine(quota, store, now = new Date()) {
-    if (isMobileDoneToday(store, now)) {
-      if (!quota || !quota.mobile) return "你已标记今天用手机做完（只是你自己的标记）";
-      return "你已标记今天用手机做完";
-    }
-    if (allowsMobileSearch(store) && shouldRunMobileSearch(store, now)) {
-      const remain = Math.max(0, effectiveMobileLimit(store, now) - readNumber(store, dailyMobileCountKey(now), 0));
-      return `将用手机样式再搜 ${remain} 次`;
-    }
-    if (!quota || !quota.mobile || quota.mobile.remaining == null) return "还没打开过 Rewards 读取配额";
-    if (quota.mobile.remaining <= 0) return "今日已满（不自动执行）";
-    return `页面显示还剩 ${quota.mobile.remaining} 次（不自动执行）`;
-  }
-
-  function formatEdgeHint(quota) {
-    if (!quota || !quota.edge || quota.edge.remaining == null || quota.edge.remaining <= 0) return "";
-    return `页面还显示 Edge 奖励剩余 ${quota.edge.remaining}。请用 Microsoft Edge 自己完成`;
-  }
-
-  function formatEdgeQuotaLine(quota) {
-    if (!quota || !quota.edge || quota.edge.remaining == null) return "还没读到";
-    if (quota.edge.remaining <= 0) return "页面显示今日已满";
-    return formatEdgeHint(quota);
-  }
-
   function formatQuotaHint(quota, store, now = new Date()) {
     const pc = quota && quota.pc && quota.pc.remaining > 0 ? formatPcQuotaHint(quota) : "";
-    return [pc, formatMobileHint(quota, store, now), formatDailyHint(quota), formatEdgeHint(quota)].filter(Boolean).join("。");
+    return [pc, formatMobileHint(store, now), formatDailyHint(quota)].filter(Boolean).join("。");
   }
 
   function formatCompleteQuotaHint(quota, store, now = new Date()) {
     const bits = [];
     if (quota && quota.pc && quota.pc.remaining > 0) bits.push(formatPcQuotaHint(quota));
-    const mobile = formatMobileHint(quota, store, now);
+    const mobile = formatMobileHint(store, now);
     if (mobile) bits.push(mobile);
     const daily = formatDailyHint(quota);
     if (daily) bits.push(daily);
-    const edge = formatEdgeHint(quota);
-    if (edge) bits.push(edge);
     return bits.filter(Boolean).join("。");
   }
 
@@ -1195,10 +1319,10 @@
   function cellStatusForDate(store, dateStr, now = new Date()) {
     const today = localDateString(now);
     const record = dayRecordMap(store).get(dateStr);
+    if (record && record.status === "complete") return dateStr === today ? "complete today" : "complete";
+    if (record && record.status === "failed") return dateStr === today ? "failed today" : "failed";
+    if (record) return dateStr === today ? "incomplete today" : "incomplete";
     if (dateStr === today) return "today";
-    if (record && record.status === "complete") return "complete";
-    if (record && record.status === "failed") return "failed";
-    if (record) return "incomplete";
     return "empty";
   }
 
@@ -1367,6 +1491,7 @@
       mobileCount,
       durationMs,
       at: extra.at || Date.now(),
+      date: localDateString(now),
       dailyEnabled,
       dailyDone,
       dailySummary,
@@ -1543,7 +1668,10 @@
       patch[KEYS.dailyTaskMaxRetries] = Math.max(1, Math.round(Number(patch[KEYS.dailyTaskMaxRetries]) || DEFAULT_DAILY_RETRIES));
     }
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.mobileSearchLimit)) {
-      patch[KEYS.mobileSearchLimit] = Math.max(0, Math.round(Number(patch[KEYS.mobileSearchLimit]) || DEFAULT_MOBILE_LIMIT));
+      {
+        const raw = Number(patch[KEYS.mobileSearchLimit]);
+        patch[KEYS.mobileSearchLimit] = Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : DEFAULT_MOBILE_LIMIT;
+      }
     }
     [
       KEYS.missedRemindEnabled,
@@ -1577,6 +1705,19 @@
     if (!raw || typeof raw !== "object") return { date: localDateString(now), cards: [] };
     if (raw.date !== localDateString(now)) return { date: localDateString(now), cards: [] };
     return { date: raw.date, cards: Array.isArray(raw.cards) ? raw.cards : [] };
+  }
+
+  function isCompleteToday(store, now = new Date()) {
+    const today = localDateString(now);
+    const record = dayRecordMap(store).get(today);
+    if (record && record.status === "complete") return true;
+    const summary = store && store[KEYS.lastRunSummary] && typeof store[KEYS.lastRunSummary] === "object"
+      ? store[KEYS.lastRunSummary]
+      : null;
+    if (!summary || summary.reason !== "complete") return false;
+    if (summary.date === today) return true;
+    const at = Number(summary.at);
+    return Number.isFinite(at) && localDateString(new Date(at)) === today;
   }
 
   function buildViewModel(store, now = new Date()) {
@@ -1622,14 +1763,15 @@
 
     const mobilePending = shouldRunMobileSearch(store, now);
     const searchPhase = store[KEYS.searchPhase] || "";
+    const dailySatisfied = !dailyEnabled || dailyDone || (dailySummary.total > 0 && dailySummary.autoPending === 0);
+    const finishedToday = isCompleteToday(store, now);
     let state = "ready";
     if (!riskAccepted) state = "onboarding";
     else if (loginState === "out") state = "logged_out";
     else if (paused) state = "paused";
     else if (running) state = "running";
-    else if (productState === "failed" && (count < limit || mobilePending || (dailyEnabled && !dailyDone))) state = "failed";
-    else if (count >= limit && !mobilePending && (!dailyEnabled || dailyDone || (dailySummary.total > 0 && dailySummary.autoPending === 0))) state = "complete";
-    else if (productState === "complete" && !mobilePending && (!dailyEnabled || dailyDone)) state = "complete";
+    else if (productState === "failed" && !finishedToday && (count < limit || mobilePending || (dailyEnabled && !dailyDone))) state = "failed";
+    else if (!mobilePending && (finishedToday || (count >= limit && dailySatisfied))) state = "complete";
     else state = "ready";
 
     const elapsedMs = running && startedAt > 0 ? Math.max(0, now.getTime() - startedAt) : (summary?.durationMs || 0);
@@ -1661,10 +1803,6 @@
       quota,
       quotaHint: formatQuotaHint(quota, store, now),
       pcQuotaHint: formatPcQuotaHint(quota),
-      mobileHint: formatMobileHint(quota, store, now),
-      mobileQuotaLine: formatMobileQuotaLine(quota, store, now),
-      edgeHint: formatEdgeHint(quota),
-      edgeQuotaLine: formatEdgeQuotaLine(quota),
       completeQuotaHint: formatCompleteQuotaHint(quota, store, now),
       mobilePending,
       mobileDoneToday: isMobileDoneToday(store, now),
@@ -2055,23 +2193,25 @@
     SETTINGS_EXPORT_KEYS,
     exportSettings,
     importSettings,
+    isRewardsPage,
+    isRewardsVisitUrl,
     isRewardsDashboardPath,
     isQuizOrVotePage,
     parseQuotaCards,
+    parseRewardsDashboardData,
+    parseJsonIfQuota,
     readQuotaSnapshot,
     mergeQuotaSnapshot,
     formatPcQuotaHint,
     formatMobileHint,
     formatDailyHint,
-    formatMobileQuotaLine,
-    formatEdgeHint,
-    formatEdgeQuotaLine,
     formatQuotaHint,
     formatCompleteQuotaHint,
     parseQuizQuestionTotal,
     formatQuizNextStep,
     formatQuizAssistFallback,
     readTaskList,
+    isCompleteToday,
     buildViewModel,
     suggestedTimeLabel,
     warn,

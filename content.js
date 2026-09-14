@@ -34,7 +34,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     }
     if (shouldRefreshBar && typeof updateMiniBar === "function") updateMiniBar();
     if (changes[BingAssistant.KEYS.taskList] && typeof renderTaskListFromStore === "function") renderTaskListFromStore();
-    if ((changes[BingAssistant.KEYS.userTaskAction] || changes[BingAssistant.KEYS.paused]) && typeof handleRewardsPage === "function" && location.hostname === "rewards.bing.com") {
+    if ((changes[BingAssistant.KEYS.userTaskAction] || changes[BingAssistant.KEYS.paused]) && typeof handleRewardsPage === "function" && BingAssistant.isRewardsPage(location)) {
         handleRewardsPage();
     }
 });
@@ -732,7 +732,7 @@ function getRewardsPagePoints() {
 
 // 主入口：严格分流，互不干扰
 function getBingPoints() {
-    if (window.location.hostname === "rewards.bing.com") {
+    if (BingAssistant.isRewardsPage(location)) {
         return getRewardsPagePoints();
     } else {
         return getSearchPagePoints();
@@ -887,7 +887,7 @@ function publishAssistantState() {
     [BingAssistant.KEYS.lastKeyword]: keyword,
     [BingAssistant.KEYS.lastStatusMessage]: ($("#ex-user-msg").text() || "").trim()
   };
-  const onRewards = window.location.hostname === "rewards.bing.com";
+  const onRewards = BingAssistant.isRewardsPage(location);
   if (points !== null) {
     payload[BingAssistant.KEYS.pointsBalance] = points;
     payload[BingAssistant.KEYS.loginState] = "in";
@@ -939,7 +939,7 @@ function updateMiniBar() {
   const running = getVal(autoSearchLockKey, "off") === "on";
   const paused = isRunPaused();
   const model = BingAssistant.buildViewModel(rebangExtensionStore);
-  const onRewards = location.hostname === "rewards.bing.com";
+  const onRewards = BingAssistant.isRewardsPage(location);
   if (onRewards) {
     $("#rebang-mini-progress").text("每日活动");
     $("#ext-task-summary").text(`每日活动 ${model.dailyProgress}`);
@@ -1134,7 +1134,7 @@ function dailyTasksWanted() {
 }
 
 function isMobileSearchMode() {
-    if (location.hostname === "rewards.bing.com") return false;
+    if (BingAssistant.isRewardsPage(location)) return false;
     if (sessionStorage.getItem("Rebang_SearchKind") === "mobile") return true;
     try {
         if (new URLSearchParams(location.search).get(BingAssistant.MOBILE_SEARCH_FLAG) === "m") {
@@ -1238,7 +1238,7 @@ function saveRewardsQuotasIfAny() {
                 };
             }
         }
-        if (!parsed.pc && !parsed.mobile && !parsed.daily && !parsed.edge) return;
+        if (!parsed.pc && !parsed.daily) return;
         const prev = BingAssistant.readQuotaSnapshot(rebangExtensionStore);
         setVal(BingAssistant.KEYS.quotaSnapshot, BingAssistant.mergeQuotaSnapshot(prev, parsed));
     } catch (error) { BingAssistant.warn("saveQuotaSnapshot", error); }
@@ -2499,8 +2499,9 @@ function initSearchControls() {
     // 定时唤醒由扩展后台闹钟负责，不再让普通 Bing 页面长期持有屏幕唤醒锁。
 
     // 1. 如果是 Rewards 页面
-    if (location.hostname === "rewards.bing.com") {
+    if (BingAssistant.isRewardsPage(location)) {
         if ($("#rebang-widget").length == 0) initRewardsControls();
+        handleRewardsPage();
         setInterval(handleRewardsPage, 3000);
     }
     // 2. 如果是 搜索 页面

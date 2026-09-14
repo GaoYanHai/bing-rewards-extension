@@ -342,20 +342,6 @@ async function finishMobileSearch() {
   return advanceAfterMobile(message);
 }
 
-async function markMobileDoneToday() {
-  const store = await readStore();
-  await A.Storage.set({
-    [KEYS.mobileDoneDate]: A.localDateString(),
-    [KEYS.runLogs]: withLog(store, { action: "你已标记今天用手机做完" })
-  });
-  const next = await readStore();
-  if (next[KEYS.searchPhase] === "mobile") {
-    return advanceAfterMobile("你已标记今天用手机做完");
-  }
-  await updateBadge();
-  return { ok: true };
-}
-
 async function handleMobileTabRemoved(tabId) {
   const store = await readStore();
   if (Number(store[KEYS.mobileSearchTabId] || 0) !== tabId) return;
@@ -915,14 +901,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (type === "MOBILE_SEARCH_FINISHED") {
     finishMobileSearch().then(sendResponse);
-    return true;
-  }
-  if (type === "MARK_MOBILE_DONE") {
-    markMobileDoneToday().then(sendResponse);
-    return true;
-  }
-  if (type === "UNMARK_MOBILE_DONE") {
-    A.Storage.set({ [KEYS.mobileDoneDate]: "" }).then(() => sendResponse({ ok: true }));
     return true;
   }
   if (type === "SET_TODAY_GOAL") {

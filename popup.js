@@ -23,9 +23,6 @@ const whatsNewTitle = document.getElementById("whats-new-title");
 const primaryBtn = document.getElementById("primary-btn");
 const hint = document.getElementById("hint");
 const hintActions = document.getElementById("hint-actions");
-const mobileActions = document.getElementById("mobile-actions");
-const mobileDoneBtn = document.getElementById("mobile-done");
-const mobileUndoneBtn = document.getElementById("mobile-undone");
 const logBox = document.getElementById("log-box");
 const stopLink = document.getElementById("stop-link");
 
@@ -65,14 +62,6 @@ function setHintActions(visible) {
   hintActions.hidden = !visible;
 }
 
-function renderMobileActions(model) {
-  if (!mobileActions) return;
-  mobileActions.hidden = !model.riskAccepted;
-  const marked = !!model.mobileDoneToday;
-  if (mobileDoneBtn) mobileDoneBtn.hidden = marked;
-  if (mobileUndoneBtn) mobileUndoneBtn.hidden = !marked;
-}
-
 function renderWeek(model) {
   const cells = model.weekCells || [];
   if (!cells.length) {
@@ -102,16 +91,23 @@ function fillHelp(model) {
   document.getElementById("help-points").innerHTML = (copy.points || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
 }
 
+function setHelpOpen(open) {
+  document.documentElement.classList.toggle("help-open", open);
+  document.body.classList.toggle("help-open", open);
+}
+
 function showHelp() {
   fillHelp(A.buildViewModel({}));
   A.Storage.getAll().then((store) => fillHelp(A.buildViewModel(store)));
   viewRisk.hidden = true;
   viewMain.hidden = true;
   viewHelp.hidden = false;
+  setHelpOpen(true);
 }
 
 function showMain() {
   viewHelp.hidden = true;
+  setHelpOpen(false);
   void refresh();
 }
 
@@ -122,13 +118,16 @@ function render(store) {
   if (showRisk) {
     viewMain.hidden = true;
     viewHelp.hidden = true;
+    setHelpOpen(false);
     return;
   }
   if (!viewHelp.hidden) {
     viewMain.hidden = true;
     fillHelp(model);
+    setHelpOpen(true);
     return;
   }
+  setHelpOpen(false);
   viewMain.hidden = false;
 
   if (model.points !== null) {
@@ -155,7 +154,6 @@ function render(store) {
   renderWeek(model);
   renderWhatsNew(model);
   renderLogs(model);
-  renderMobileActions(model);
 
   if (model.state === "logged_out") {
     stateLine.textContent = "还没有检测到微软账号";
@@ -308,19 +306,6 @@ document.getElementById("task-skip").addEventListener("click", async () => {
 document.getElementById("task-open").addEventListener("click", async () => {
   await send("OPEN_REWARDS");
 });
-if (mobileDoneBtn) {
-  mobileDoneBtn.addEventListener("click", async () => {
-    await send("MARK_MOBILE_DONE");
-    await refresh();
-  });
-}
-if (mobileUndoneBtn) {
-  mobileUndoneBtn.addEventListener("click", async () => {
-    await send("UNMARK_MOBILE_DONE");
-    await refresh();
-  });
-}
-
 document.getElementById("open-options").addEventListener("click", () => {
   chrome.runtime.openOptionsPage();
 });
