@@ -5,6 +5,13 @@ importScripts("shared.js");
 const A = BingAssistant;
 const KEYS = A.KEYS;
 
+let runGate = Promise.resolve();
+function withRunGate(fn) {
+  const next = runGate.then(fn, fn);
+  runGate = next.then(() => undefined, () => undefined);
+  return next;
+}
+
 async function readStore() {
   return A.Storage.getAll();
 }
@@ -579,8 +586,16 @@ function syncGoalPatch(goal) {
 }
 
 async function startToday(reason = "manual") {
+  return withRunGate(() => startTodayUnlocked(reason));
+}
+
+async function startTodayUnlocked(reason = "manual") {
   await clearQuietWatchdog();
   const store = await readStore();
+  if (A.isLockOn(store)) {
+    if (reason === "manual" && A.isPaused(store)) return resumeTodayUnlocked();
+    return { ok: true };
+  }
   const foreground = reason !== "alarm" && reason !== "catchup" && reason !== "missed";
   if (store[KEYS.riskAccepted] !== true) {
     return { ok: false, error: "请先确认使用风险" };
@@ -642,6 +657,10 @@ async function startToday(reason = "manual") {
 }
 
 async function stopToday(message = "已停止") {
+  return withRunGate(() => stopTodayUnlocked(message));
+}
+
+async function stopTodayUnlocked(message = "已停止") {
   await clearQuietWatchdog();
   await clearMobileSearchSession({ phase: "" });
   const store = await readStore();
@@ -660,6 +679,10 @@ async function stopToday(message = "已停止") {
 }
 
 async function pauseToday(reason = A.PAUSE_REASONS.USER, message) {
+  return withRunGate(() => pauseTodayUnlocked(reason, message));
+}
+
+async function pauseTodayUnlocked(reason = A.PAUSE_REASONS.USER, message) {
   await clearQuietWatchdog();
   const store = await readStore();
   if (!A.isLockOn(store)) {
@@ -690,9 +713,13 @@ async function pauseToday(reason = A.PAUSE_REASONS.USER, message) {
 }
 
 async function resumeToday(options = {}) {
+  return withRunGate(() => resumeTodayUnlocked(options));
+}
+
+async function resumeTodayUnlocked(options = {}) {
   const store = await readStore();
   if (!A.isLockOn(store)) {
-    return startToday("manual");
+    return startTodayUnlocked("manual");
   }
   const ignoreBusyMs = options.ignoreBusyMs != null ? Number(options.ignoreBusyMs) : 8000;
   await A.Storage.set({

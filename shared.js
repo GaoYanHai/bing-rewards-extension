@@ -12,13 +12,21 @@
   const DEFAULT_NO_GAIN_LIMIT = 10;
   const DEFAULT_DAILY_RETRIES = 3;
   const DEFAULT_MOBILE_LIMIT = 20;
+  const SEARCH_LIMIT_MIN = 1;
+  const SEARCH_LIMIT_MAX = 150;
+  const MOBILE_LIMIT_MIN = 0;
+  const MOBILE_LIMIT_MAX = 80;
+  const NO_GAIN_LIMIT_MIN = 3;
+  const NO_GAIN_LIMIT_MAX = 30;
+  const DAILY_RETRIES_MIN = 1;
+  const DAILY_RETRIES_MAX = 10;
   const SUGGESTED_HOUR = 21;
   const SUGGESTED_MINUTE = 30;
   const MIN_SEARCH_INTERVAL = 8;
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "3.3.2";
+  const PRODUCT_VERSION = "3.3.3";
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -361,11 +369,23 @@
     return weekendGoal === WEEKEND_GOAL_SAME ? weekdayGoal : weekendGoal;
   }
 
+  function clampInt(value, min, max, fallback) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(num)));
+  }
+
+  function weekdaySearchLimit(store) {
+    return clampInt(readNumber(store || {}, KEYS.limitSearchCount, DEFAULT_SEARCH_LIMIT), SEARCH_LIMIT_MIN, SEARCH_LIMIT_MAX, DEFAULT_SEARCH_LIMIT);
+  }
+
   function effectiveSearchLimit(store, now = new Date()) {
-    const weekdayLimit = Math.max(1, readNumber(store || {}, KEYS.limitSearchCount, DEFAULT_SEARCH_LIMIT));
+    const weekdayLimit = weekdaySearchLimit(store);
     if (!isWeekend(now)) return weekdayLimit;
     const weekendLimit = Number(store && store[KEYS.weekendSearchLimit]);
-    if (Number.isFinite(weekendLimit) && weekendLimit > 0) return Math.max(1, Math.round(weekendLimit));
+    if (Number.isFinite(weekendLimit) && weekendLimit > 0) {
+      return clampInt(weekendLimit, SEARCH_LIMIT_MIN, SEARCH_LIMIT_MAX, weekdayLimit);
+    }
     return weekdayLimit;
   }
 
@@ -582,11 +602,11 @@
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "3.3.2 去掉读不准的配额",
+      title: "3.3.3 导入次数更稳",
       points: [
-        "不再展示移动搜索配额和 Edge 奖励，避免一直显示读不到",
-        "设置页数字可以直接输入，不会被改回默认值",
-        "危险设置里的移动搜索仍按你填的次数执行",
+        "导入备份时，搜索次数会按设置页的上下限收紧",
+        "今天已经开始后再点开始，不会把当前进度冲掉",
+        "开始失败时，会直接告诉你原因",
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
@@ -1227,7 +1247,7 @@
   }
 
   function effectiveMobileLimit(store) {
-    return Math.max(0, readNumber(store, KEYS.mobileSearchLimit, DEFAULT_MOBILE_LIMIT));
+    return clampInt(readNumber(store, KEYS.mobileSearchLimit, DEFAULT_MOBILE_LIMIT), MOBILE_LIMIT_MIN, MOBILE_LIMIT_MAX, DEFAULT_MOBILE_LIMIT);
   }
 
   function shouldRunMobileSearch(store, now = new Date()) {
@@ -1648,13 +1668,22 @@
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.blockedKeywords)) {
       patch[KEYS.blockedKeywords] = normalizeStringList(patch[KEYS.blockedKeywords]);
     }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.autoStartHour) || Object.prototype.hasOwnProperty.call(patch, KEYS.autoStartMin)) {
+      const parsed = parseHourMinute(patch[KEYS.autoStartHour], patch[KEYS.autoStartMin]);
+      if (!parsed.enabled) {
+        delete patch[KEYS.autoStartHour];
+        delete patch[KEYS.autoStartMin];
+      } else {
+        patch[KEYS.autoStartHour] = String(parsed.hour);
+        patch[KEYS.autoStartMin] = String(parsed.minute);
+      }
+    }
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.limitSearchCount)) {
-      const value = Math.max(1, Math.round(Number(patch[KEYS.limitSearchCount]) || DEFAULT_SEARCH_LIMIT));
-      patch[KEYS.limitSearchCount] = value;
+      patch[KEYS.limitSearchCount] = clampInt(patch[KEYS.limitSearchCount], SEARCH_LIMIT_MIN, SEARCH_LIMIT_MAX, DEFAULT_SEARCH_LIMIT);
     }
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.weekendSearchLimit)) {
       const rawLimit = String(patch[KEYS.weekendSearchLimit] == null ? "" : patch[KEYS.weekendSearchLimit]).trim();
-      patch[KEYS.weekendSearchLimit] = rawLimit ? Math.max(1, Math.round(Number(rawLimit) || DEFAULT_SEARCH_LIMIT)) : "";
+      patch[KEYS.weekendSearchLimit] = rawLimit ? clampInt(rawLimit, SEARCH_LIMIT_MIN, SEARCH_LIMIT_MAX, DEFAULT_SEARCH_LIMIT) : "";
     }
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.searchIntervalMin) || Object.prototype.hasOwnProperty.call(patch, KEYS.searchIntervalMax)) {
       const range = normalizeIntervalRange(patch[KEYS.searchIntervalMin], patch[KEYS.searchIntervalMax]);
@@ -1662,16 +1691,13 @@
       patch[KEYS.searchIntervalMax] = range.max;
     }
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.maxNoGainLimit)) {
-      patch[KEYS.maxNoGainLimit] = Math.max(3, Math.round(Number(patch[KEYS.maxNoGainLimit]) || DEFAULT_NO_GAIN_LIMIT));
+      patch[KEYS.maxNoGainLimit] = clampInt(patch[KEYS.maxNoGainLimit], NO_GAIN_LIMIT_MIN, NO_GAIN_LIMIT_MAX, DEFAULT_NO_GAIN_LIMIT);
     }
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.dailyTaskMaxRetries)) {
-      patch[KEYS.dailyTaskMaxRetries] = Math.max(1, Math.round(Number(patch[KEYS.dailyTaskMaxRetries]) || DEFAULT_DAILY_RETRIES));
+      patch[KEYS.dailyTaskMaxRetries] = clampInt(patch[KEYS.dailyTaskMaxRetries], DAILY_RETRIES_MIN, DAILY_RETRIES_MAX, DEFAULT_DAILY_RETRIES);
     }
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.mobileSearchLimit)) {
-      {
-        const raw = Number(patch[KEYS.mobileSearchLimit]);
-        patch[KEYS.mobileSearchLimit] = Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : DEFAULT_MOBILE_LIMIT;
-      }
+      patch[KEYS.mobileSearchLimit] = clampInt(patch[KEYS.mobileSearchLimit], MOBILE_LIMIT_MIN, MOBILE_LIMIT_MAX, DEFAULT_MOBILE_LIMIT);
     }
     [
       KEYS.missedRemindEnabled,
@@ -1722,7 +1748,7 @@
 
   function buildViewModel(store, now = new Date()) {
     const count = readNumber(store, dailyCountKey(now), 0);
-    const weekdayLimit = Math.max(1, readNumber(store, KEYS.limitSearchCount, DEFAULT_SEARCH_LIMIT));
+    const weekdayLimit = weekdaySearchLimit(store);
     const weekdayGoal = normalizeGoal(store);
     const limit = effectiveSearchLimit(store, now);
     const goal = effectiveGoal(store, now);
@@ -1837,8 +1863,8 @@
       elapsedMs,
       summary,
       wordPack: normalizeWordPack(store[KEYS.selectedChannel]),
-      noGainLimit: readNumber(store, KEYS.maxNoGainLimit, DEFAULT_NO_GAIN_LIMIT),
-      dailyRetries: readNumber(store, KEYS.dailyTaskMaxRetries, DEFAULT_DAILY_RETRIES),
+      noGainLimit: clampInt(readNumber(store, KEYS.maxNoGainLimit, DEFAULT_NO_GAIN_LIMIT), NO_GAIN_LIMIT_MIN, NO_GAIN_LIMIT_MAX, DEFAULT_NO_GAIN_LIMIT),
+      dailyRetries: clampInt(readNumber(store, KEYS.dailyTaskMaxRetries, DEFAULT_DAILY_RETRIES), DAILY_RETRIES_MIN, DAILY_RETRIES_MAX, DEFAULT_DAILY_RETRIES),
       customKeywords: String(store[KEYS.customKeywords] || ""),
       blockedKeywords: normalizeStringList(store[KEYS.blockedKeywords]),
       keywordPlan,
@@ -2033,6 +2059,29 @@
     }
   }
 
+  function sendMessage(type, extra = {}) {
+    return new Promise((resolve) => {
+      try {
+        if (typeof chrome === "undefined" || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") {
+          resolve({ ok: false, error: "扩展还没准备好", disconnected: true });
+          return;
+        }
+        chrome.runtime.sendMessage({ type, ...extra }, (result) => {
+          const err = chrome.runtime && chrome.runtime.lastError;
+          if (err) {
+            warn("sendMessage", err);
+            resolve({ ok: false, error: "暂时没法完成这个操作，请再试一次。", disconnected: true });
+            return;
+          }
+          resolve(result || { ok: true });
+        });
+      } catch (error) {
+        warn("sendMessage", error);
+        resolve({ ok: false, error: "暂时没法完成这个操作，请再试一次。", disconnected: true });
+      }
+    });
+  }
+
   const Storage = {
     async get(keys) {
       try {
@@ -2075,6 +2124,14 @@
     DEFAULT_NO_GAIN_LIMIT,
     DEFAULT_DAILY_RETRIES,
     DEFAULT_MOBILE_LIMIT,
+    SEARCH_LIMIT_MIN,
+    SEARCH_LIMIT_MAX,
+    MOBILE_LIMIT_MIN,
+    MOBILE_LIMIT_MAX,
+    NO_GAIN_LIMIT_MIN,
+    NO_GAIN_LIMIT_MAX,
+    DAILY_RETRIES_MIN,
+    DAILY_RETRIES_MAX,
     SUGGESTED_HOUR,
     SUGGESTED_MINUTE,
     MIN_SEARCH_INTERVAL,
@@ -2134,6 +2191,8 @@
     normalizeWeekendWordPack,
     usesWeekendLifePack,
     effectiveGoal,
+    clampInt,
+    weekdaySearchLimit,
     effectiveSearchLimit,
     readDayRecords,
     pruneDayRecords,
@@ -2215,6 +2274,7 @@
     buildViewModel,
     suggestedTimeLabel,
     warn,
+    sendMessage,
     Storage,
     $
   };
@@ -2222,5 +2282,5 @@
 
 if (typeof globalThis !== "undefined") {
   globalThis.BingAssistant = BingAssistant;
-  globalThis.$ = BingAssistant.$;
+  if (typeof document !== "undefined") globalThis.$ = BingAssistant.$;
 }

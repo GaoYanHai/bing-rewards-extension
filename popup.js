@@ -27,7 +27,7 @@ const logBox = document.getElementById("log-box");
 const stopLink = document.getElementById("stop-link");
 
 function send(type, extra = {}) {
-  return chrome.runtime.sendMessage({ type, ...extra });
+  return A.sendMessage(type, extra);
 }
 
 function withQuotaHint(text, model) {
@@ -281,18 +281,27 @@ riskAccept.addEventListener("click", async () => {
 });
 
 primaryBtn.addEventListener("click", async () => {
-  const action = primaryBtn.dataset.action;
-  if (action === "pause") await send("PAUSE_TODAY");
-  else if (action === "resume") await send("RESUME_TODAY");
-  else if (action === "stop") await send("STOP_TODAY");
-  else if (action === "login" || action === "open") await send("OPEN_BING");
-  else await send("START_TODAY");
-  await refresh();
+  if (primaryBtn.disabled) return;
+  primaryBtn.disabled = true;
+  try {
+    const action = primaryBtn.dataset.action;
+    let result;
+    if (action === "pause") result = await send("PAUSE_TODAY");
+    else if (action === "resume") result = await send("RESUME_TODAY");
+    else if (action === "stop") result = await send("STOP_TODAY");
+    else if (action === "login" || action === "open") result = await send("OPEN_BING");
+    else result = await send("START_TODAY");
+    await refresh();
+    if (result && result.disconnected && result.error) hint.textContent = result.error;
+  } finally {
+    primaryBtn.disabled = false;
+  }
 });
 
 stopLink.addEventListener("click", async () => {
-  await send("STOP_TODAY");
+  const result = await send("STOP_TODAY");
   await refresh();
+  if (result && result.disconnected && result.error) hint.textContent = result.error;
 });
 
 document.getElementById("task-done").addEventListener("click", async () => {
@@ -310,12 +319,23 @@ document.getElementById("open-options").addEventListener("click", () => {
   chrome.runtime.openOptionsPage();
 });
 document.getElementById("open-bing").addEventListener("click", () => send("OPEN_BING"));
-document.getElementById("whats-new-dismiss").addEventListener("click", async () => {
-  await send("DISMISS_WHATS_NEW");
+async function dismissWhatsNew() {
+  if (whatsNew) whatsNew.hidden = true;
+  const ok = await A.Storage.set({ [A.KEYS.whatsNewSeen]: A.PRODUCT_VERSION });
+  if (ok === false && whatsNew) whatsNew.hidden = false;
+  return ok;
+}
+
+document.getElementById("whats-new-dismiss").addEventListener("click", async (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  await dismissWhatsNew();
   await refresh();
 });
-document.getElementById("whats-new-more").addEventListener("click", async () => {
-  await send("DISMISS_WHATS_NEW");
+document.getElementById("whats-new-more").addEventListener("click", async (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  await dismissWhatsNew();
   showHelp();
 });
 document.getElementById("open-help").addEventListener("click", () => showHelp());

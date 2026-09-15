@@ -4,7 +4,7 @@
 
 对外名称：Bing 积分助手（Bing Rewards Assistant）
 
-当前版本：3.3.2
+当前版本：3.3.3
 
 商店：[在 Edge 加载项中获取](https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj)
 
@@ -83,6 +83,15 @@
 详见 [PRIVACY.md](PRIVACY.md)。设置、词库和进度都只存在本机，不会上传。
 
 ## 更新日志
+
+### 3.3.3 - 2026-09-15
+
+导入和重复开始更稳。
+
+- 导入备份时，搜索次数会按设置页的上下限收紧
+- 今天已经开始后再点开始，不会把当前进度冲掉
+- 开始失败时，会直接告诉你原因
+- 默认仍是安全模式，只做电脑搜索；权限和产品名不变
 
 ### 3.3.2 - 2026-09-14
 
@@ -295,13 +304,9 @@
 ├─ content.js
 ├─ PRIVACY.md
 ├─ _locales/
-├─ icons/
-├─ store/
-│  └─ logo-300.png
-└─ vendor/
-   └─ jquery-3.7.1.min.js
+└─ icons/
 ```
 
 ## 许可证
 
-本项目按照 GNU General Public License v3.0 or later 发布。jQuery 按其原 MIT License 发布。
+本项目按照 GNU General Public License v3.0 or later 发布。

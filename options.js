@@ -38,7 +38,7 @@ const simulateTyping = document.getElementById("simulate-typing");
 const pauseWhenBusy = document.getElementById("pause-when-busy");
 
 function send(type, extra = {}) {
-  return chrome.runtime.sendMessage({ type, ...extra });
+  return A.sendMessage(type, extra);
 }
 
 function renderChips(container, items, emptyText, onRemove) {
@@ -82,8 +82,7 @@ function setIfIdle(el, value, asCheckbox) {
 
 function commitNumber(el, key, min, max, fallback) {
   if (!el) return;
-  const num = Number(String(el.value || "").trim());
-  const value = Number.isFinite(num) ? Math.min(max, Math.max(min, Math.round(num))) : fallback;
+  const value = A.clampInt(el.value, min, max, fallback);
   el.value = String(value);
   return save({ [key]: value });
 }
@@ -230,7 +229,7 @@ scheduleTime.addEventListener("change", async () => {
 todayGoal.addEventListener("change", () => send("SET_TODAY_GOAL", { goal: todayGoal.value }));
 weekendGoal.addEventListener("change", () => save({ [A.KEYS.weekendGoal]: A.normalizeWeekendGoal(weekendGoal.value) }));
 searchLimit.addEventListener("change", () => {
-  void commitNumber(searchLimit, A.KEYS.limitSearchCount, 1, 150, A.DEFAULT_SEARCH_LIMIT);
+  void commitNumber(searchLimit, A.KEYS.limitSearchCount, A.SEARCH_LIMIT_MIN, A.SEARCH_LIMIT_MAX, A.DEFAULT_SEARCH_LIMIT);
 });
 weekendSearchLimit.addEventListener("change", () => {
   const raw = String(weekendSearchLimit.value || "").trim();
@@ -240,7 +239,7 @@ weekendSearchLimit.addEventListener("change", () => {
     return;
   }
   const num = Number(raw);
-  const value = Number.isFinite(num) ? Math.min(150, Math.max(1, Math.round(num))) : A.DEFAULT_SEARCH_LIMIT;
+  const value = A.clampInt(num, A.SEARCH_LIMIT_MIN, A.SEARCH_LIMIT_MAX, A.DEFAULT_SEARCH_LIMIT);
   weekendSearchLimit.value = String(value);
   void save({ [A.KEYS.weekendSearchLimit]: value });
 });
@@ -257,10 +256,10 @@ if (weekendWordPack) {
   });
 }
 noGainLimit.addEventListener("change", () => {
-  void commitNumber(noGainLimit, A.KEYS.maxNoGainLimit, 3, 30, A.DEFAULT_NO_GAIN_LIMIT);
+  void commitNumber(noGainLimit, A.KEYS.maxNoGainLimit, A.NO_GAIN_LIMIT_MIN, A.NO_GAIN_LIMIT_MAX, A.DEFAULT_NO_GAIN_LIMIT);
 });
 dailyRetries.addEventListener("change", () => {
-  void commitNumber(dailyRetries, A.KEYS.dailyTaskMaxRetries, 1, 10, A.DEFAULT_DAILY_RETRIES);
+  void commitNumber(dailyRetries, A.KEYS.dailyTaskMaxRetries, A.DAILY_RETRIES_MIN, A.DAILY_RETRIES_MAX, A.DEFAULT_DAILY_RETRIES);
 });
 catchupEnabled.addEventListener("change", () => save({ [A.KEYS.catchUpEnabled]: catchupEnabled.checked }));
 catchupAsk.addEventListener("change", () => save({ [A.KEYS.catchUpAsk]: catchupAsk.checked }));
@@ -326,7 +325,7 @@ mobileEnabled.addEventListener("change", () => {
 });
 if (mobileLimit) {
   mobileLimit.addEventListener("change", () => {
-    void commitNumber(mobileLimit, A.KEYS.mobileSearchLimit, 0, 80, A.DEFAULT_MOBILE_LIMIT);
+    void commitNumber(mobileLimit, A.KEYS.mobileSearchLimit, A.MOBILE_LIMIT_MIN, A.MOBILE_LIMIT_MAX, A.DEFAULT_MOBILE_LIMIT);
   });
 }
 
