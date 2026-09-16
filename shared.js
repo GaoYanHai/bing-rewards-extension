@@ -26,7 +26,9 @@
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
-  const PRODUCT_VERSION = "3.3.3";
+  const PRODUCT_VERSION = "3.4.0";
+  const TRANSIENT_FAIL_CONFIRM_MISSES = 8;
+  const ACCOUNT_CHANGE_CONFIRM_MISSES = 3;
   const DAY_RECORD_KEEP_DAYS = 35;
   const DAY_RECORD_SHOW_DAYS = 7;
   const DAY_CHART_DAYS = 30;
@@ -60,9 +62,9 @@
   };
 
   const REPEAT_LABELS = {
-    daily: "每天",
+    daily: "每天开始",
     weekdays: "仅工作日",
-    weekends: "仅周末"
+    weekends: "仅周六周日"
   };
 
   const PAUSE_REASONS = {
@@ -130,6 +132,7 @@
     dailyTaskMaxRetries: "Rebang_DailyTaskMaxRetries",
     autoSearchLockExpires: "Rebang_AutoSearchLockExpires",
     consecutiveNoGain: "Rebang_ConsecutiveNoGainCount",
+    noGainHold: "Rebang_NoGainHold",
     lastPoints: "Rebang_LastPoints",
     autoStartHour: "Rebang_AutoStartHour",
     autoStartMin: "Rebang_AutoStartMin",
@@ -251,6 +254,49 @@
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
+  }
+
+  function parseLocalDate(value) {
+    const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    if (localDateString(date) !== `${match[1]}-${match[2]}-${match[3]}`) return null;
+    return date;
+  }
+
+  function clampLogDate(dateStr, now = new Date()) {
+    const today = localDateString(now);
+    const min = localDateString(shiftLocalDate(now, -(DAY_RECORD_SHOW_DAYS - 1)));
+    const date = parseLocalDate(dateStr);
+    if (!date) return today;
+    const value = localDateString(date);
+    if (value > today) return today;
+    if (value < min) return min;
+    return value;
+  }
+
+  function formatLogDateLabel(dateStr, now = new Date()) {
+    const date = parseLocalDate(dateStr);
+    if (!date) return "日志";
+    const pretty = `${date.getMonth() + 1}月${date.getDate()}日`;
+    const value = localDateString(date);
+    if (value === localDateString(now)) return `${pretty}（今天）`;
+    if (value === localDateString(shiftLocalDate(now, -1))) return `${pretty}（昨天）`;
+    return `${pretty} ${weekdayShort(date)}`;
+  }
+
+  function logDateChoices(now = new Date()) {
+    const choices = [];
+    for (let offset = 0; offset < DAY_RECORD_SHOW_DAYS; offset++) {
+      const date = shiftLocalDate(now, -offset);
+      const value = localDateString(date);
+      choices.push({ value, label: formatLogDateLabel(value, now) });
+    }
+    return choices;
+  }
+
+  function shouldConfirmTransientFail(missCount, limit = TRANSIENT_FAIL_CONFIRM_MISSES) {
+    return Number(missCount) >= Number(limit);
   }
 
   function dailyCountKey(date = new Date()) {
@@ -426,27 +472,110 @@
   }
 
   function buildWeekCells(store, now = new Date()) {
-    const records = dayRecordMap(store);
     const today = localDateString(now);
     const cells = [];
     for (let offset = DAY_RECORD_SHOW_DAYS - 1; offset >= 0; offset--) {
       const date = shiftLocalDate(now, -offset);
       const dateStr = localDateString(date);
-      const record = records.get(dateStr);
-      let status = "empty";
-      if (record && record.status === "complete") status = "complete";
-      else if (record && record.status === "failed") status = "failed";
-      else if (record) status = "incomplete";
-      else if (dateStr === today) status = "today";
+      const detail = buildDayDetail(store, dateStr, now);
+      const status = detail.status;
       cells.push({
         date: dateStr,
         day: date.getDate(),
         weekday: weekdayShort(date).replace("周", ""),
         status: dateStr === today && status !== "today" ? `${status} today` : status,
-        title: `${date.getMonth() + 1}月${date.getDate()}日 ${recordStatusLabel(status)}`
+        title: detail.hoverTitle,
+        summary: detail.summary,
+        count: detail.count,
+        limit: detail.limit,
+        pointsGained: detail.pointsGained
       });
     }
     return cells;
+  }
+
+  function formatDaySummary(detail) {
+    if (!detail) return "";
+    const bits = [];
+    if (detail.count > 0 || detail.status === "failed" || detail.status === "complete" || detail.status === "incomplete") {
+      bits.push(`电脑搜索 ${detail.count || 0}/${detail.limit || 0}`);
+    }
+    if (detail.mobileCount) bits.push(`移动搜索 ${detail.mobileCount} 次`);
+    if (Number.isFinite(detail.pointsGained) && detail.pointsGained > 0) bits.push(`大约 +${detail.pointsGained}`);
+    else if (detail.pointsGained === 0 && (detail.count > 0 || detail.status === "failed" || detail.status === "complete")) bits.push("这次没有加到分");
+    if (Number.isFinite(detail.points)) bits.push(`积分 ${detail.points}`);
+    if (detail.status === "failed" && detail.failShort) bits.push(detail.failShort);
+    return bits.join(" · ");
+  }
+
+  function buildDayDetail(store, dateStr, now = new Date()) {
+    const today = localDateString(now);
+    const date = parseLocalDate(dateStr) || (dateStr === today ? new Date(now.getFullYear(), now.getMonth(), now.getDate()) : null);
+    if (!date) {
+      return {
+        date: dateStr || "",
+        status: "empty",
+        statusLabel: recordStatusLabel("empty"),
+        title: recordStatusLabel("empty"),
+        hoverTitle: recordStatusLabel("empty"),
+        summary: "",
+        body: "这天还没有记录。",
+        count: 0,
+        limit: 0,
+        mobileCount: 0,
+        points: null,
+        pointsGained: null,
+        reasonCode: "",
+        failShort: "",
+        logs: []
+      };
+    }
+    const resolved = localDateString(date);
+    const record = dayRecordMap(store).get(resolved);
+    let status = String(cellStatusForDate(store, resolved, now) || "empty").replace(" today", "").trim() || "empty";
+    let count = record && record.count != null ? Number(record.count) : 0;
+    let limit = record && record.limit != null ? Number(record.limit) : 0;
+    let mobileCount = record && record.mobileCount != null ? Number(record.mobileCount) : 0;
+    let points = record && record.points != null ? Number(record.points) : null;
+    let pointsGained = record && record.pointsGained != null ? Number(record.pointsGained) : null;
+    let reasonCode = record && record.reasonCode ? String(record.reasonCode) : "";
+    if (resolved === today) {
+      count = readNumber(store, dailyCountKey(now), count || 0);
+      limit = effectiveSearchLimit(store, now);
+      mobileCount = readNumber(store, dailyMobileCountKey(now), mobileCount || 0);
+      const livePoints = readablePoints(store && store[KEYS.pointsBalance]);
+      if (livePoints != null) points = livePoints;
+      const liveGain = pointsGainedFrom(store);
+      if (liveGain != null) pointsGained = liveGain;
+      if (!reasonCode) reasonCode = store && store[KEYS.failReasonCode] ? String(store[KEYS.failReasonCode]) : "";
+    }
+    const fail = failCopy(reasonCode);
+    const logs = logsForDate(store && store[KEYS.runLogs], resolved);
+    const statusLabel = recordStatusLabel(status);
+    const title = `${date.getMonth() + 1}月${date.getDate()}日 ${statusLabel}`;
+    const detail = {
+      date: resolved,
+      status,
+      statusLabel,
+      title,
+      count,
+      limit,
+      mobileCount,
+      points: Number.isFinite(points) ? points : null,
+      pointsGained: Number.isFinite(pointsGained) ? pointsGained : null,
+      reasonCode,
+      failShort: status === "failed" ? fail.short : "",
+      logs
+    };
+    const summary = formatDaySummary(detail);
+    let body = summary || (resolved === today && status === "today" ? "今天还没开始。" : "这天还没有记录。");
+    if (status === "failed" && fail.short && !(summary && summary.includes(fail.short))) {
+      body = summary ? `${summary}。${fail.short}` : fail.short;
+    }
+    detail.summary = summary;
+    detail.body = body;
+    detail.hoverTitle = summary ? `${title} · ${summary}` : title;
+    return detail;
   }
 
   function consecutiveCompleteDays(store, now = new Date()) {
@@ -574,39 +703,68 @@
     return curr * 10 <= prev && drop >= 200;
   }
 
+  function hadLoginHistory(store) {
+    if (!store || typeof store !== "object") return false;
+    if (store[KEYS.loginState] === "in") return true;
+    if (readablePoints(store[KEYS.pointsBalance]) !== null) return true;
+    if (readablePoints(store[KEYS.lastPoints]) !== null) return true;
+    if (readablePoints(store[KEYS.runStartPoints]) !== null) return true;
+    return false;
+  }
+
   function loginLooksLost(login, extra = {}) {
-    if (login === "out") return true;
-    if (extra.accountChanged) return true;
-    if (extra.giveUp && extra.wasLoggedIn && extra.points == null && login !== "in") return true;
+    extra = extra || {};
+    if (extra.accountChanged && (extra.giveUp === true || extra.confirmed === true)) return true;
+    return false;
+  }
+
+  function isUncertainLoginRead(login, currentPoints) {
+    if (currentPoints == null) return true;
+    if (login === "out" || login === "unknown") return true;
     return false;
   }
 
   function continueHint(model) {
-    if (!model) return "点继续会接着今天的进度，不会从头搜。";
-    if (isLoginFailCode(model.failReasonCode)) return model.failMessage || "请确认微软账号后继续今天的进度。";
+    const resume = "点继续会接着今天的进度，不会从头搜。";
+    if (!model) return resume;
+    const count = Number(model.count) || 0;
+    const limit = Number(model.limit) || 0;
+    const gained = Number(model.pointsGained);
+    const progress = [];
+    if (count > 0 && limit > 0) progress.push(`已经完成 ${count}/${limit} 次搜索`);
+    else if (count > 0) progress.push(`已经完成 ${count} 次搜索`);
+    if (Number.isFinite(gained) && gained > 0) progress.push(`大约 +${gained}`);
+    const progressText = progress.length ? `${progress.join("，")}。` : "";
+    if (isLoginFailCode(model.failReasonCode)) {
+      const reason = /登录状态变了/.test(String(model.failShort || model.failMessage || ""))
+        ? "登录状态看起来变了，也可能是网络波动。"
+        : (model.failMessage || "请确认微软账号后继续今天的进度。");
+      const needsResume = !/继续/.test(reason);
+      return `${progressText}${reason}${needsResume ? resume : ""}`;
+    }
     if (isMobileFailCode(model.failReasonCode)) {
-      return model.failMessage || "可以用手机 Bing 做完。";
+      return `${progressText}${model.failMessage || "可以用手机 Bing 做完。"}`;
     }
     if (model.count >= model.limit && model.mobilePending) {
-      return "电脑搜索已满，继续会去做移动搜索。";
+      return `${progressText}电脑搜索已满，继续会去做移动搜索。`;
     }
     if (model.count >= model.limit && model.dailyEnabled && !model.dailyDone) {
-      return "电脑搜索已满，继续会去处理每日活动。";
+      return `${progressText}电脑搜索已满，继续会去处理每日活动。`;
     }
-    if (model.count > 0) {
-      return `已经完成 ${model.count}/${model.limit} 次搜索。点继续会接着做，不会从头搜。`;
-    }
-    return model.failMessage || "点继续会接着今天的进度，不会从头搜。";
+    if (count > 0) return `${progressText}${resume}`;
+    return model.failMessage || resume;
   }
 
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "3.3.3 导入次数更稳",
+      title: "3.4.0 失败也能看清进度",
       points: [
-        "导入备份时，搜索次数会按设置页的上下限收紧",
-        "今天已经开始后再点开始，不会把当前进度冲掉",
-        "开始失败时，会直接告诉你原因",
+        "点 Popup 上的周几，能看到那天搜了几次、加了多少分",
+        "设置页日志可以往前翻，查看前几天的记录",
+        "自动开始可设每天开始、仅工作日，或仅周六周日",
+        "暂时读不到登录状态时会继续搜索；恢复后重新计分，空转不计入连续没有加分",
+        "设置页顶部导航点击后，高亮和滚动位置会对准对应区块",
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
@@ -819,7 +977,7 @@
         short: changed ? "登录状态变了" : "需要重新登录",
         next: changed ? "请确认微软账号后继续今天的进度" : "打开 Bing 并登录微软账号",
         message: changed
-          ? "登录状态变了，已停止。请确认微软账号后继续今天的进度"
+          ? "登录状态看起来变了，已停止。如果账号其实还在，可能是网络波动。点继续会接着今天的进度。"
           : "没有检测到积分。请确认已登录微软账号，然后重试。"
       };
     }
@@ -870,8 +1028,8 @@
     if (code === FAIL_CODES.NETWORK) {
       return {
         short: "网络失败",
-        next: "检查网络后重试",
-        message: "网络好像不通，已停止。请检查连接后重试。"
+        next: "检查网络后点继续",
+        message: "网络多次连不上，已停止。请检查连接后点继续，会接着今天的进度。"
       };
     }
     return {
@@ -1557,9 +1715,13 @@
     return [entry.time, entry.action, entry.result, entry.reason].filter(Boolean).join("  ");
   }
 
+  function logsForDate(logs, dateStr) {
+    const date = dateStr || "";
+    return (Array.isArray(logs) ? logs : []).filter((item) => item && item.date === date);
+  }
+
   function todayLogs(logs, now = new Date()) {
-    const today = localDateString(now);
-    return (Array.isArray(logs) ? logs : []).filter((item) => item && item.date === today);
+    return logsForDate(logs, localDateString(now));
   }
 
   function exportLogsText(logs) {
@@ -1892,7 +2054,9 @@
         dailyEnabled,
         dailyDone,
         mobilePending,
+        pointsGained: summary && summary.pointsGained != null ? summary.pointsGained : pointsGainedFrom(store),
         failReasonCode,
+        failShort: fail.short,
         failMessage: lastError || fail.message
       }),
       showWhatsNew: shouldShowWhatsNew(store),
@@ -2139,6 +2303,8 @@
     DEFAULT_INTERVAL_MIN,
     DEFAULT_INTERVAL_MAX,
     PRODUCT_VERSION,
+    TRANSIENT_FAIL_CONFIRM_MISSES,
+    ACCOUNT_CHANGE_CONFIRM_MISSES,
     QUIZ_ASSIST_MAX_HITS,
     DAY_RECORD_KEEP_DAYS,
     DAY_RECORD_SHOW_DAYS,
@@ -2169,6 +2335,11 @@
     LONG_KEYWORD_POOL,
     WEEKEND_KEYWORD_POOL,
     localDateString,
+    parseLocalDate,
+    clampLogDate,
+    formatLogDateLabel,
+    logDateChoices,
+    shouldConfirmTransientFail,
     dailyCountKey,
     dailyMobileCountKey,
     triggeredKey,
@@ -2198,6 +2369,8 @@
     pruneDayRecords,
     upsertDayRecord,
     buildWeekCells,
+    formatDaySummary,
+    buildDayDetail,
     consecutiveCompleteDays,
     yesterdayMissed,
     streakLine,
@@ -2222,7 +2395,9 @@
     isMobileFailCode,
     isLoginFailCode,
     pointsLookLikeAccountChanged,
+    hadLoginHistory,
     loginLooksLost,
+    isUncertainLoginRead,
     isDangerEnabled,
     allowsHighRiskTasks,
     allowsQuizAssist,
@@ -2247,6 +2422,7 @@
     formatCompleteNotify,
     appendRunLog,
     formatLogLine,
+    logsForDate,
     todayLogs,
     exportLogsText,
     SETTINGS_EXPORT_KEYS,

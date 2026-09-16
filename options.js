@@ -18,6 +18,8 @@ const todayWords = document.getElementById("today-words");
 const blockWord = document.getElementById("block-word");
 const blockedWords = document.getElementById("blocked-words");
 const logList = document.getElementById("log-list");
+const logDate = document.getElementById("log-date");
+let selectedLogDate = "";
 const noGainLimit = document.getElementById("no-gain-limit");
 const dailyRetries = document.getElementById("daily-retries");
 const catchupEnabled = document.getElementById("catchup-enabled");
@@ -171,10 +173,18 @@ function fill(store) {
     await save({ [A.KEYS.blockedKeywords]: next });
     await send("REFRESH_KEYWORDS");
   });
-  const logs = model.logs || [];
+  const today = A.localDateString();
+  selectedLogDate = A.clampLogDate(selectedLogDate || today);
+  if (logDate && !isEditing(logDate)) {
+    const choices = A.logDateChoices();
+    const html = choices.map((item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("");
+    if (logDate.innerHTML !== html) logDate.innerHTML = html;
+    if (logDate.value !== selectedLogDate) logDate.value = selectedLogDate;
+  }
+  const logs = A.logsForDate(store[A.KEYS.runLogs], selectedLogDate);
   logList.innerHTML = logs.length
     ? logs.map((entry) => `<div>${escapeHtml(A.formatLogLine(entry))}</div>`).join("")
-    : "还没有今天的日志。";
+    : (selectedLogDate === today ? "还没有今天的日志。" : "这天还没有日志。");
 }
 
 async function save(partial) {
@@ -344,6 +354,13 @@ document.getElementById("block-word-btn").addEventListener("click", async () => 
   await send("BLOCK_KEYWORD", { word });
   blockWord.value = "";
 });
+if (logDate) {
+  logDate.addEventListener("change", () => {
+    selectedLogDate = A.clampLogDate(logDate.value);
+    return A.Storage.getAll().then(fill);
+  });
+}
+
 document.getElementById("export-logs").addEventListener("click", async () => {
   const result = await send("EXPORT_LOGS");
   const text = result && result.text ? result.text : "";
@@ -416,23 +433,139 @@ chrome.storage.onChanged.addListener(async (_changes, area) => {
   fill(await A.Storage.getAll());
 });
 
+const pageNav = document.querySelector(".page-nav");
 const settingsSections = Array.from(document.querySelectorAll("main section[id]"));
 const settingsLinks = Array.from(document.querySelectorAll(".page-nav a[href^='#']"));
-const activeSection = settingsSections.find((section) => {
-  const rect = section.getBoundingClientRect();
-  return rect.top >= 0 && rect.top < window.innerHeight * 0.4;
-}) || settingsSections[0];
-const activeLink = settingsLinks.find((link) => link.hash === `#${activeSection && activeSection.id}`);
-if (activeLink) activeLink.classList.add("active");
+const linkedSections = settingsSections.filter((section) => {
+  return settingsLinks.some((link) => link.hash === `#${section.id}`);
+});
 
-const sectionObserver = new IntersectionObserver((entries) => {
-  const visible = entries
-    .filter((entry) => entry.isIntersecting)
-    .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-  if (!visible) return;
-  settingsLinks.forEach((link) => link.classList.toggle("active", link.hash === `#${visible.target.id}`));
-}, { rootMargin: "-62px 0px -55% 0px", threshold: 0 });
+let pinnedNavId = "";
+let navTick = 0;
+let programmaticNavScroll = false;
 
-settingsSections.forEach((section) => sectionObserver.observe(section));
+function navOffset() {
+  const height = pageNav ? pageNav.getBoundingClientRect().height : 56;
+  return Math.max(48, Math.ceil(height + 10));
+}
 
-void A.Storage.getAll().then(fill);
+function applyNavOffset() {
+  const offset = navOffset();
+  document.documentElement.style.scrollPaddingTop = "0px";
+  document.documentElement.style.setProperty("--nav-offset", `${offset}px`);
+  linkedSections.forEach((section) => {
+    section.style.scrollMarginTop = `${offset}px`;
+  });
+  return offset;
+}
+
+function setActiveNav(id) {
+  settingsLinks.forEach((link) => link.classList.toggle("active", link.hash === `#${id}`));
+}
+
+function currentSectionId() {
+  const marker = applyNavOffset() + 32;
+  let current = linkedSections[0];
+  linkedSections.forEach((section) => {
+    if (section.getBoundingClientRect().top <= marker) current = section;
+  });
+  return current && current.id;
+}
+
+function syncSettingsNav() {
+  if (pinnedNavId) {
+    setActiveNav(pinnedNavId);
+    return;
+  }
+  setActiveNav(currentSectionId());
+}
+
+function requestNavSync() {
+  if (navTick) return;
+  navTick = window.requestAnimationFrame(() => {
+    navTick = 0;
+    syncSettingsNav();
+  });
+}
+
+function releasePinnedNav() {
+  if (!pinnedNavId) return;
+  pinnedNavId = "";
+  syncSettingsNav();
+}
+
+function pinNav(id) {
+  pinnedNavId = id;
+  setActiveNav(id);
+}
+
+function sectionScrollTop(id) {
+  const section = document.getElementById(id);
+  if (!section) return null;
+  const offset = applyNavOffset();
+  const scroller = document.scrollingElement || document.documentElement;
+  return Math.max(0, Math.round(scroller.scrollTop + section.getBoundingClientRect().top - offset));
+}
+
+function scrollToSection(id, behavior) {
+  const top = sectionScrollTop(id);
+  if (top == null) return;
+  const scroller = document.scrollingElement || document.documentElement;
+  if (Math.abs(scroller.scrollTop - top) < 2) return;
+  programmaticNavScroll = true;
+  if (behavior === "instant") scroller.scrollTop = top;
+  else scroller.scrollTo({ top, behavior: "smooth" });
+}
+
+function goToSection(id) {
+  if (!id || !document.getElementById(id)) return false;
+  pinNav(id);
+  scrollToSection(id);
+  return true;
+}
+
+settingsLinks.forEach((link) => {
+  link.addEventListener("click", (event) => {
+    const id = (link.hash || "").replace("#", "");
+    event.preventDefault();
+    if (!goToSection(id)) return;
+    if (history.replaceState) history.replaceState(null, "", `#${id}`);
+  });
+});
+window.addEventListener("scroll", requestNavSync, { passive: true });
+window.addEventListener("scrollend", () => {
+  if (programmaticNavScroll) {
+    programmaticNavScroll = false;
+    if (pinnedNavId) scrollToSection(pinnedNavId, "instant");
+    return;
+  }
+  releasePinnedNav();
+}, { passive: true });
+window.addEventListener("wheel", releasePinnedNav, { passive: true });
+window.addEventListener("touchmove", releasePinnedNav, { passive: true });
+window.addEventListener("keydown", (event) => {
+  if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
+    releasePinnedNav();
+  }
+});
+window.addEventListener("resize", () => {
+  applyNavOffset();
+  if (pinnedNavId) scrollToSection(pinnedNavId);
+  else requestNavSync();
+});
+window.addEventListener("hashchange", () => {
+  const id = (location.hash || "").replace("#", "");
+  if (!goToSection(id)) syncSettingsNav();
+});
+applyNavOffset();
+syncSettingsNav();
+if (location.hash) {
+  window.setTimeout(() => goToSection(location.hash.replace("#", "")), 0);
+}
+
+void A.Storage.getAll().then((store) => {
+  fill(store);
+  const id = pinnedNavId || (location.hash || "").replace("#", "");
+  if (id) goToSection(id);
+  else requestNavSync();
+});

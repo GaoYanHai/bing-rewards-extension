@@ -847,20 +847,42 @@ function stopForLogin(duringRun, extra) {
   stopAutoSearch(copy.message, "failed", code, payload);
 }
 
-function stopIfLoginOrAccountChanged(login, currentPoints, extra) {
-  extra = extra || {};
-  if (BingAssistant.loginLooksLost(login, {
-    wasLoggedIn: hadLoginBefore(),
-    points: currentPoints,
-    giveUp: !!extra.giveUp
-  })) {
-    stopForLogin(true);
-    return true;
+let loginMissCount = 0;
+let accountChangeMissCount = 0;
+let transientWaitLogged = false;
+
+function noteTransientWait(message) {
+  showUserMessage(message);
+  if (!transientWaitLogged) {
+    transientWaitLogged = true;
+    pushRunLog({ action: message, result: "等待重试" });
+  }
+}
+
+function waitOrStopForNetwork() {
+  if (navigator.onLine) return false;
+  noteTransientWait("网络好像不稳，正在等待后继续搜索。");
+  return true;
+}
+
+function stopIfLoginOrAccountChanged(login, currentPoints, _extra) {
+  if (login === "in" || currentPoints !== null) {
+    loginMissCount = 0;
+    transientWaitLogged = false;
+  } else if (login === "out" || login === "unknown") {
+    if (loginMissCount === 0) noteTransientWait("暂时读不到登录状态，继续按已登录搜索。");
+    loginMissCount += 1;
   }
   if (currentPoints !== null && BingAssistant.pointsLookLikeAccountChanged(previousPointsForAccountCheck(), currentPoints)) {
-    stopForLogin(true, { accountChanged: true });
+    accountChangeMissCount += 1;
+    if (BingAssistant.shouldConfirmTransientFail(accountChangeMissCount, BingAssistant.ACCOUNT_CHANGE_CONFIRM_MISSES)) {
+      stopForLogin(true, { accountChanged: true });
+      return true;
+    }
+    noteTransientWait("积分读数突然对不上，正在再确认一次。");
     return true;
   }
+  accountChangeMissCount = 0;
   return false;
 }
 
@@ -887,7 +909,6 @@ function publishAssistantState() {
     [BingAssistant.KEYS.lastKeyword]: keyword,
     [BingAssistant.KEYS.lastStatusMessage]: ($("#ex-user-msg").text() || "").trim()
   };
-  const onRewards = BingAssistant.isRewardsPage(location);
   if (points !== null) {
     payload[BingAssistant.KEYS.pointsBalance] = points;
     payload[BingAssistant.KEYS.loginState] = "in";
@@ -895,10 +916,11 @@ function publishAssistantState() {
       getVal(BingAssistant.KEYS.pointsHistory, []),
       points
     );
-  } else if (onRewards) {
-    if (login === "in") payload[BingAssistant.KEYS.loginState] = "in";
-  } else {
-    payload[BingAssistant.KEYS.loginState] = login;
+  } else if (login === "in") {
+    payload[BingAssistant.KEYS.loginState] = "in";
+  } else if (login === "out") {
+    const prev = getVal(BingAssistant.KEYS.loginState, "unknown");
+    if (prev !== "in" && !hadLoginBefore()) payload[BingAssistant.KEYS.loginState] = "out";
   }
   BingAssistant.Storage.set(payload);
 }
@@ -1622,8 +1644,7 @@ async function handleRewardsPage() {
     if (stopIfLoginOrAccountChanged(login, currentPoints, {
         giveUp: dashboardReady && document.readyState === "complete" && rewardsLoginMissCount >= 8
     })) return;
-    if (!navigator.onLine) {
-        stopForReason(BingAssistant.FAIL_CODES.NETWORK);
+    if (waitOrStopForNetwork()) {
         return;
     }
     if (!dailyTasksWanted()) {
@@ -1900,8 +1921,7 @@ async function doAutoSearch() {
   let dailyDone = getVal(getDailyTasksDoneKey(), false) === true || getVal(getDailyTasksDoneKey(), false) === "true";
   const track = currentSearchTrack();
 
-  if (!navigator.onLine) {
-      stopForReason(BingAssistant.FAIL_CODES.NETWORK);
+  if (waitOrStopForNetwork()) {
       return;
   }
   const login = detectLoginState();
@@ -1924,19 +1944,18 @@ async function doAutoSearch() {
   rememberStartPoints(currentPoints);
   if (currentPoints === null) {
       pointsMissCount += 1;
-      const missLimit = track.kind === "mobile" ? 10 : 8;
-      if (document.readyState === "complete" && pointsMissCount >= missLimit) {
-          if (track.kind === "mobile") {
+      if (track.kind === "mobile") {
+          if (document.readyState === "complete" && pointsMissCount >= 10) {
               stopForReason(BingAssistant.FAIL_CODES.MOBILE_POINTS);
               return;
           }
-          stopForLogin(true);
+          showUserMessage("正在确认这次移动搜索的积分...");
           return;
       }
-      showUserMessage(track.kind === "mobile" ? "正在确认这次移动搜索的积分..." : "正在确认登录和积分...");
-      return;
+      if (pointsMissCount === 1) noteTransientWait("暂时读不到积分，继续按已登录搜索。");
+  } else {
+      pointsMissCount = 0;
   }
-  pointsMissCount = 0;
   if (track.kind !== "mobile" && stopIfLoginOrAccountChanged(login, currentPoints)) return;
 
   const currentSearchCountNow = Number(getVal(track.countKey, 0));
@@ -1979,9 +1998,23 @@ async function doAutoSearch() {
 
   let maxNoGainLimit = Number(getVal(maxNoGainLimitKey, 10));
   let consecutiveNoGain = Number(getVal(consecutiveNoGainKey, 0));
+  const uncertainRead = track.kind !== "mobile" && BingAssistant.isUncertainLoginRead(login, currentPoints);
+  const recoveringRead = !uncertainRead && getVal(BingAssistant.KEYS.noGainHold, false) === true;
+  if (uncertainRead) {
+    setVal(BingAssistant.KEYS.noGainHold, true);
+  } else if (recoveringRead) {
+    setVal(BingAssistant.KEYS.noGainHold, false);
+    consecutiveNoGain = 0;
+    setVal(consecutiveNoGainKey, 0);
+    if (currentPoints !== null) {
+      lastPoints = currentPoints;
+      setVal(lastPointsKey, currentPoints);
+    }
+    showUserMessage("登录已恢复，重新开始计算加分", { action: "登录已恢复", result: "空转不计入连续没有加分" });
+  }
 
-  // 积分对比
-  if (lastPoints !== null) {
+  // 积分对比。读不到登录/积分时的空转不计入连续没有加分。
+  if (lastPoints !== null && currentPoints !== null && !uncertainRead && !recoveringRead) {
       let lastP = Number(lastPoints);
       if (track.kind !== "mobile" && BingAssistant.pointsLookLikeAccountChanged(lastP, currentPoints)) {
           stopForLogin(true, { accountChanged: true });
@@ -2461,8 +2494,7 @@ function initSearchControls() {
             return;
         }
         if (detectLoginState() === "out") {
-            stopForLogin(false);
-            return;
+            showUserMessage("暂时没读到登录状态，先按已登录开始。");
         }
 
         setVal(autoSearchLockKey, "on");

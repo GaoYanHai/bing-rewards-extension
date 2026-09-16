@@ -600,7 +600,7 @@ async function startTodayUnlocked(reason = "manual") {
   if (store[KEYS.riskAccepted] !== true) {
     return { ok: false, error: "请先确认使用风险" };
   }
-  if (store[KEYS.loginState] === "out") {
+  if (store[KEYS.loginState] === "out" && !A.hadLoginHistory(store)) {
     await openOrWakeSearchTab({ foreground: true });
     return { ok: false, error: "请先登录微软账号" };
   }
@@ -623,6 +623,7 @@ async function startTodayUnlocked(reason = "manual") {
     [KEYS.globalMasterStatus]: "IDLE",
     [KEYS.globalLastRunTime]: 0,
     [KEYS.consecutiveNoGain]: 0,
+    [KEYS.noGainHold]: false,
     [KEYS.jumpFailCount]: 0,
     [KEYS.jumpLastPoints]: -1,
     [KEYS.rewardsFailCount]: 0,
@@ -786,7 +787,7 @@ async function startDailyRun(reason = "alarm") {
   const model = A.buildViewModel(store, now);
   if (alreadyTriggered) return;
   if (model.count >= model.limit && (!model.dailyEnabled || model.dailyDone)) return;
-  if (store[KEYS.loginState] === "out") {
+  if (store[KEYS.loginState] === "out" && !A.hadLoginHistory(store)) {
     await openOrWakeSearchTab({ foreground: true });
     await notify("bing-assistant-login", "还没有登录微软账号，今天的任务还没开始。");
     return;

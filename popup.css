@@ -241,7 +241,21 @@ footer {
   background: var(--card);
   border: 1px solid transparent;
   color: var(--muted);
+  font: inherit;
   font-size: 10px;
+  width: 100%;
+  cursor: pointer;
+}
+button.week-cell {
+  appearance: none;
+  margin: 0;
+}
+.week-cell:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+.week-cell.selected {
+  border-color: var(--accent);
+  color: var(--fg);
 }
 .week-dot { width: 8px; height: 8px; border-radius: 50%; background: #b9c0c7; }
 .week-cell.complete { background: color-mix(in srgb, var(--ok) 10%, var(--card)); }
@@ -258,4 +272,20 @@ footer {
 .week-cell.today.failed .week-dot { background: var(--danger); }
 .streak-line { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
 .streak-line[hidden] { display: none; }
+.day-detail {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.day-detail[hidden] { display: none; }
+.day-detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.day-detail-head strong { font-size: 12px; }
+.day-detail p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 

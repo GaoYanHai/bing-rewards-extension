@@ -39,15 +39,21 @@ function withQuotaHint(text, model) {
   return `${base}${joiner}${extra}`;
 }
 
-function renderLogs(model) {
-  const logs = (model.logs || []).slice(0, 3);
-  if (!logs.length) {
+let selectedDay = "";
+let didAutoSelectFailDay = false;
+
+function renderLogs(model, store) {
+  const logs = selectedDay
+    ? A.logsForDate(store && store[A.KEYS.runLogs], selectedDay)
+    : (model.logs || []);
+  const shown = logs.slice(0, selectedDay ? 8 : 3);
+  if (!shown.length) {
     logBox.hidden = true;
     logBox.innerHTML = "";
     return;
   }
   logBox.hidden = false;
-  logBox.innerHTML = logs.map((entry) => `<div>${escapeHtml(A.formatLogLine(entry))}</div>`).join("");
+  logBox.innerHTML = shown.map((entry) => `<div>${escapeHtml(A.formatLogLine(entry))}</div>`).join("");
 }
 
 function escapeHtml(str) {
@@ -62,20 +68,47 @@ function setHintActions(visible) {
   hintActions.hidden = !visible;
 }
 
-function renderWeek(model) {
+function renderDayDetail(store) {
+  const panel = document.getElementById("day-detail");
+  const title = document.getElementById("day-detail-title");
+  const body = document.getElementById("day-detail-body");
+  if (!panel || !title || !body) return;
+  if (!selectedDay) {
+    panel.hidden = true;
+    title.textContent = "";
+    body.textContent = "";
+    return;
+  }
+  const detail = A.buildDayDetail(store, selectedDay);
+  panel.hidden = false;
+  title.textContent = detail.title || "";
+  body.textContent = detail.body || "";
+}
+
+function renderWeek(model, store) {
   const cells = model.weekCells || [];
   if (!cells.length) {
     weekRow.hidden = true;
     weekRow.innerHTML = "";
     streakLine.hidden = true;
+    selectedDay = "";
+    renderDayDetail(store);
     return;
   }
+  if (model.state === "failed" && !didAutoSelectFailDay) {
+    selectedDay = A.localDateString();
+    didAutoSelectFailDay = true;
+  }
+  if (model.state !== "failed") didAutoSelectFailDay = false;
   weekRow.hidden = false;
   weekRow.innerHTML = cells.map((cell) => {
-    return `<div class="week-cell ${escapeHtml(cell.status)}" title="${escapeHtml(cell.title)}"><span>${escapeHtml(cell.weekday)}</span><i class="week-dot"></i></div>`;
+    const selected = selectedDay === cell.date ? " selected" : "";
+    const pressed = selectedDay === cell.date ? "true" : "false";
+    return `<button type="button" class="week-cell ${escapeHtml(cell.status)}${selected}" data-date="${escapeHtml(cell.date)}" title="${escapeHtml(cell.title)}" aria-pressed="${pressed}"><span>${escapeHtml(cell.weekday)}</span><i class="week-dot"></i></button>`;
   }).join("");
   streakLine.hidden = !model.streakLine;
   streakLine.textContent = model.streakLine || "";
+  renderDayDetail(store);
 }
 
 function renderWhatsNew(model) {
@@ -151,9 +184,9 @@ function render(store) {
   primaryBtn.disabled = false;
   stopLink.hidden = true;
   setHintActions(false);
-  renderWeek(model);
+  renderWeek(model, store);
   renderWhatsNew(model);
-  renderLogs(model);
+  renderLogs(model, store);
 
   if (model.state === "logged_out") {
     stateLine.textContent = "还没有检测到微软账号";
@@ -243,9 +276,14 @@ function render(store) {
 
   if (model.state === "failed") {
     stateLine.textContent = "这次没有完成，已停止";
+    const gained = model.summary?.pointsGained || model.pointsGained;
+    if (Number(gained) > 0) {
+      stat2Label.textContent = "这次加分";
+      stat2Value.textContent = `大约 +${gained}`;
+    }
     stat3Label.textContent = "原因";
     stat3Value.textContent = model.failShort || "已停止";
-    const loginFail = A.isLoginFailCode(model.failReasonCode);
+    const loginFail = A.isLoginFailCode(model.failReasonCode) && model.loginState !== "in";
     primaryBtn.textContent = loginFail ? "打开 Bing 并登录" : "继续";
     hint.textContent = model.continueHint || model.failMessage || "点继续会接着今天的进度，不会从头搜。";
     primaryBtn.dataset.action = loginFail ? "login" : "start";
@@ -314,6 +352,17 @@ document.getElementById("task-skip").addEventListener("click", async () => {
 });
 document.getElementById("task-open").addEventListener("click", async () => {
   await send("OPEN_REWARDS");
+});
+weekRow.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-date]");
+  if (!btn || !weekRow.contains(btn)) return;
+  const date = btn.getAttribute("data-date") || "";
+  selectedDay = selectedDay === date ? "" : date;
+  void refresh();
+});
+document.getElementById("day-detail-close").addEventListener("click", () => {
+  selectedDay = "";
+  void refresh();
 });
 document.getElementById("open-options").addEventListener("click", () => {
   chrome.runtime.openOptionsPage();

@@ -33,7 +33,7 @@
   }
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+html { scroll-behavior: auto; scroll-padding-top: 0; }
 body {
   margin: 0;
   background:
@@ -89,7 +89,7 @@ header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .page-nav a:hover { color: var(--fg); background: var(--surface); }
 .page-nav a.active { color: var(--accent); background: var(--accent-soft); }
 section {
-  scroll-margin-top: 72px;
+  scroll-margin-top: var(--nav-offset, 64px);
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 13px;
@@ -234,6 +234,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .chip button { height: auto; border: 0; padding: 0; background: transparent; color: var(--muted); }
 .chip button:hover:not(:disabled) { border: 0; background: transparent; color: var(--danger); }
+#log-date { min-width: 160px; }
 .log-list {
   max-height: 240px;
   overflow: auto;
