@@ -26,6 +26,7 @@
   const MAX_SEARCH_INTERVAL = 60;
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
+  const BUSY_IDLE_MS = 60000;
   const PRODUCT_VERSION = "3.4.0";
   const TRANSIENT_FAIL_CONFIRM_MISSES = 8;
   const ACCOUNT_CHANGE_CONFIRM_MISSES = 3;
@@ -838,7 +839,28 @@
   }
 
   function isLockOn(store) {
-    return store[KEYS.autoSearchLock] === "on";
+    return Boolean(store) && store[KEYS.autoSearchLock] === "on";
+  }
+
+  function queryLooksLikeUserSearch(currentQuery, lastKeyword) {
+    const q = String(currentQuery || "").trim();
+    const last = String(lastKeyword || "").trim();
+    if (!q || !last) return false;
+    return q !== last;
+  }
+
+  function shouldSkipAutoStart(store, now = new Date()) {
+    if (!store) return true;
+    if (isLockOn(store)) return true;
+    const triggered = store[triggeredKey(now)];
+    if (triggered === true || triggered === "true") return true;
+    const summary = store[KEYS.lastRunSummary];
+    if (summary && typeof summary === "object" && summary.date === localDateString(now)) {
+      if (summary.reason === "failed" || summary.reason === "complete" || summary.reason === "stopped") {
+        return true;
+      }
+    }
+    return false;
   }
 
   function normalizeWordPack(value) {
@@ -2302,6 +2324,7 @@
     MAX_SEARCH_INTERVAL,
     DEFAULT_INTERVAL_MIN,
     DEFAULT_INTERVAL_MAX,
+    BUSY_IDLE_MS,
     PRODUCT_VERSION,
     TRANSIENT_FAIL_CONFIRM_MISSES,
     ACCOUNT_CHANGE_CONFIRM_MISSES,
@@ -2352,6 +2375,8 @@
     formatDuration,
     readNumber,
     isLockOn,
+    queryLooksLikeUserSearch,
+    shouldSkipAutoStart,
     isPaused,
     normalizeRepeatRule,
     isScheduledDay,

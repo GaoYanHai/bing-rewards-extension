@@ -435,7 +435,8 @@ function setVal(key, value) { GM_setValue(key, value); }
 
 let simulatingTyping = false;
 let searchInFlight = false;
-let lastUserInputAt = 0;
+let lastUserActivityAt = 0;
+let abortSearchForUser = false;
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -465,13 +466,58 @@ function isFullscreenNow() {
     return window.innerHeight >= screen.height - 2 && window.innerWidth >= screen.width - 2;
 }
 
+function isOurDrivenSearchBox(el) {
+    if (!el) return false;
+    if (el.id === "sb_form_q") return true;
+    if (el.name === "q" && el.closest && el.closest("#sb_form")) return true;
+    return false;
+}
+
+function isExtensionWidgetEvent(event) {
+    const target = event && event.target;
+    if (!target || !target.closest) return false;
+    return Boolean(target.closest("#rebang-widget"));
+}
+
+function currentSearchQuery() {
+    try {
+        return String(new URLSearchParams(location.search).get("q") || "").trim();
+    } catch (_error) {
+        return "";
+    }
+}
+
+function hasRecentUserActivity(ms) {
+    return lastUserActivityAt > 0 && (Date.now() - lastUserActivityAt) < ms;
+}
+
+function pageHasUserQuery() {
+    return BingAssistant.queryLooksLikeUserSearch(
+        currentSearchQuery(),
+        getVal(BingAssistant.KEYS.lastKeyword, "")
+    );
+}
+
+function userOwnsThisResultsPage() {
+    return pageHasUserQuery() && document.hasFocus();
+}
+
+function markTrustedUserActivity(event) {
+    if (!event || event.isTrusted === false) return;
+    if (isExtensionWidgetEvent(event)) return;
+    lastUserActivityAt = Date.now();
+    if (simulatingTyping) abortSearchForUser = true;
+}
+
 function isUserBusyNow() {
-    if (simulatingTyping) return false;
     if (Number(getVal(BingAssistant.KEYS.ignoreBusyUntil, 0)) > Date.now()) return false;
     if (getVal(BingAssistant.KEYS.pauseWhenBusy, true) === false) return false;
     if (isFullscreenNow()) return true;
-    const typingRecently = Date.now() - lastUserInputAt < 4000;
-    return typingRecently && isEditableTarget(document.activeElement);
+    const active = document.activeElement;
+    if (active && String(active.tagName || "").toLowerCase() === "iframe") return true;
+    if (isEditableTarget(active) && !(simulatingTyping && isOurDrivenSearchBox(active))) return true;
+    if (userOwnsThisResultsPage()) return true;
+    return hasRecentUserActivity(BingAssistant.BUSY_IDLE_MS);
 }
 
 function rememberStartPoints(points) {
@@ -485,15 +531,15 @@ function setUserTaskButtons(visible) {
     if (box.length) box.toggleClass("is-on", !!visible);
 }
 
-document.addEventListener("keydown", (event) => {
-    if (simulatingTyping) return;
-    if (isEditableTarget(event.target) || isEditableTarget(document.activeElement)) {
-        lastUserInputAt = Date.now();
+["keydown", "input", "pointerdown", "mousedown", "touchstart", "wheel", "focusin"].forEach((type) => {
+    document.addEventListener(type, markTrustedUserActivity, true);
+});
+window.addEventListener("blur", () => {
+    const active = document.activeElement;
+    if (active && String(active.tagName || "").toLowerCase() === "iframe") {
+        lastUserActivityAt = Date.now();
+        if (simulatingTyping) abortSearchForUser = true;
     }
-}, true);
-document.addEventListener("input", (event) => {
-    if (simulatingTyping) return;
-    if (isEditableTarget(event.target)) lastUserInputAt = Date.now();
 }, true);
 
 // 常量定义
@@ -545,7 +591,14 @@ function syncTabStatus() {
     let isMaster = false;
 
     // --- 场景 1: 我就是当前搜索页 ---
-    if (masterId === currentTabId) {
+    if (pageHasUserQuery()) {
+        if (masterId === currentTabId) {
+            setVal(globalMasterTabKey, "");
+            setVal(globalMasterStatusKey, "IDLE");
+        }
+        isMaster = false;
+    }
+    else if (masterId === currentTabId) {
         isMaster = true;
         // 更新心跳
         setVal(globalLockKey, now);
@@ -562,7 +615,7 @@ function syncTabStatus() {
     else {
         // 1. 当前搜索页已经没动静 (isMasterDead) -> 由这一页接着做
         // 2. 当前搜索页还在，但处于闲置 (Status == IDLE) -> 由这一页接着做
-        if (masterId === "" || isMasterDead || masterStatus === "IDLE") {
+        if ((masterId === "" || isMasterDead || masterStatus === "IDLE") && !isUserBusyNow() && !pageHasUserQuery()) {
 
             // 改由这一页负责搜索
             setVal(globalMasterTabKey, currentTabId);
@@ -1036,18 +1089,27 @@ function doSearch(keyword) {
 async function typeKeywordLikeHuman(keyword) {
     const box = findSearchBox();
     if (box.$input.length === 0 || box.$btn.length === 0) return false;
+    abortSearchForUser = false;
     simulatingTyping = true;
     try {
         box.$input.trigger("focus");
         nativeSetValue(box.$input[0], "");
         box.$input[0].dispatchEvent(new Event("input", { bubbles: true }));
         for (let i = 0; i < keyword.length; i++) {
+            if (abortSearchForUser) {
+                await maybeHandleBusyPause();
+                return false;
+            }
             if (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) return false;
             nativeSetValue(box.$input[0], keyword.slice(0, i + 1));
             box.$input[0].dispatchEvent(new Event("input", { bubbles: true }));
             await sleep(70 + Math.floor(Math.random() * 110));
         }
         await sleep(180 + Math.floor(Math.random() * 220));
+        if (abortSearchForUser) {
+            await maybeHandleBusyPause();
+            return false;
+        }
         if (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) return false;
         box.$btn[0].click();
         return true;
@@ -1059,6 +1121,10 @@ async function typeKeywordLikeHuman(keyword) {
 }
 
 async function performSearch(keyword) {
+    if (abortSearchForUser || isUserBusyNow()) {
+        await maybeHandleBusyPause();
+        return false;
+    }
     const simulate = getVal(BingAssistant.KEYS.simulateTyping, false) === true;
     if (simulate) {
         const typed = await typeKeywordLikeHuman(keyword);
@@ -1889,6 +1955,14 @@ async function handleRewardsPage() {
 
 async function doAutoSearch() {
   if (searchInFlight) return;
+  if (await maybeHandleBusyPause()) {
+      updateMiniBar();
+      return;
+  }
+  if (pageHasUserQuery()) {
+      updateMiniBar();
+      return;
+  }
   // 每次执行搜索前，先同步状态。如果不是当前负责的搜索页，就不要动手。
   let isMaster = syncTabStatus();
   let lastGlobalRun = Number(getVal(globalLockKey, 0));
@@ -1897,10 +1971,6 @@ async function doAutoSearch() {
 
   // 只要这一页不是当前搜索页，说明别的搜索页还在跑，这里待机。
   if (!isMaster) {
-      return;
-  }
-  if (await maybeHandleBusyPause()) {
-      updateMiniBar();
       return;
   }
   const phase = currentSearchPhase();
@@ -2305,6 +2375,7 @@ function checkAutoStart() {
     if (isNaN(startHour) || isNaN(startMin) || startHour === -1 || startMin === -1) return;
     if (!BingAssistant.isScheduledDay(new Date(), getVal(BingAssistant.KEYS.repeatRule, BingAssistant.REPEAT.DAILY))) return;
 
+    if (BingAssistant.shouldSkipAutoStart(rebangExtensionStore)) return;
     let triggeredKey = getAutoStartTriggeredKey();
     if (getVal(triggeredKey, "false") === "true") return;
 
@@ -2498,6 +2569,7 @@ function initSearchControls() {
         }
 
         setVal(autoSearchLockKey, "on");
+        setVal(getAutoStartTriggeredKey(), "true");
         setVal(consecutiveNoGainKey, 0);
         setVal(jumpFailCountKey, 0);
         setVal(jumpLastPointsKey, -1);

@@ -75,6 +75,15 @@ async function scheduleQuietWatchdog() {
 async function activateTabWithoutFocus(tabId) {
   if (typeof tabId !== "number") return false;
   try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab && typeof tab.windowId === "number") {
+      const win = await chrome.windows.get(tab.windowId);
+      if (win && win.focused) {
+        const activeTabs = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+        const active = activeTabs.find((item) => typeof item.id === "number");
+        if (active && active.id !== tabId) return false;
+      }
+    }
     await chrome.tabs.update(tabId, { active: true });
     return true;
   } catch (_error) {
@@ -637,6 +646,7 @@ async function startTodayUnlocked(reason = "manual") {
     [KEYS.runStartPoints]: startPoints,
     [KEYS.lastStatusMessage]: action,
     [KEYS.searchPhase]: model.count >= model.limit && model.mobilePending ? "mobile" : (model.count >= model.limit ? "daily" : "pc"),
+    [A.triggeredKey()]: "true",
     [KEYS.runLogs]: withLog(store, { action }),
     ...clearRunFlags()
   });
@@ -783,9 +793,8 @@ async function startDailyRun(reason = "alarm") {
   if (store[KEYS.riskAccepted] !== true) return;
   if (!A.isScheduledDay(now, store[KEYS.repeatRule])) return;
   if (reason === "catchup" && store[KEYS.catchUpDismissed] === A.localDateString(now)) return;
-  const alreadyTriggered = store[A.triggeredKey(now)] === "true" || store[A.triggeredKey(now)] === true;
+  if (A.shouldSkipAutoStart(store, now)) return;
   const model = A.buildViewModel(store, now);
-  if (alreadyTriggered) return;
   if (model.count >= model.limit && (!model.dailyEnabled || model.dailyDone)) return;
   if (store[KEYS.loginState] === "out" && !A.hadLoginHistory(store)) {
     await openOrWakeSearchTab({ foreground: true });
@@ -1052,6 +1061,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         [KEYS.lastStatusMessage]: message.message || copy.message,
         [KEYS.autoSearchLock]: "off",
         [KEYS.waitingUserTask]: null,
+        [A.triggeredKey()]: "true",
         [KEYS.runLogs]: withLog(store, {
           action: reason === "complete" ? "今天的任务已完成" : "已停止",
           result: message.message || copy.message || summary.closingLine,
