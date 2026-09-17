@@ -27,7 +27,8 @@
   const DEFAULT_INTERVAL_MIN = 8;
   const DEFAULT_INTERVAL_MAX = 14;
   const BUSY_IDLE_MS = 60000;
-  const PRODUCT_VERSION = "3.4.0";
+  const IGNORE_BUSY_AFTER_SEARCH_MS = 20000;
+  const PRODUCT_VERSION = "3.4.1";
   const TRANSIENT_FAIL_CONFIRM_MISSES = 8;
   const ACCOUNT_CHANGE_CONFIRM_MISSES = 3;
   const DAY_RECORD_KEEP_DAYS = 35;
@@ -80,6 +81,7 @@
     NO_GAIN: "no_gain",
     RISK: "risk",
     PAGE_CHANGED: "page_changed",
+    PAGE_UNRESPONSIVE: "page_unresponsive",
     NETWORK: "network",
     STOPPED: "stopped",
     MOBILE_NO_GAIN: "mobile_no_gain",
@@ -134,6 +136,8 @@
     autoSearchLockExpires: "Rebang_AutoSearchLockExpires",
     consecutiveNoGain: "Rebang_ConsecutiveNoGainCount",
     noGainHold: "Rebang_NoGainHold",
+    searchSubmitted: "Rebang_SearchSubmitted",
+    lastCountedQuery: "Rebang_LastCountedQuery",
     lastPoints: "Rebang_LastPoints",
     autoStartHour: "Rebang_AutoStartHour",
     autoStartMin: "Rebang_AutoStartMin",
@@ -188,6 +192,7 @@
     userTaskAction: "Rebang_UserTaskAction",
     userTaskConfirmTries: "Rebang_UserTaskConfirmTries",
     ignoreBusyUntil: "Rebang_IgnoreBusyUntil",
+    globalMasterVisible: "Rebang_GlobalMasterVisible",
     dayRecords: "Rebang_DayRecords",
     weekendGoal: "Rebang_WeekendGoal",
     weekendSearchLimit: "Rebang_WeekendSearchLimit",
@@ -652,6 +657,13 @@
     return true;
   }
 
+  function catchUpNoteAction(kind, handled) {
+    if (handled) return "ignore";
+    if (kind === "button1") return "dismiss";
+    if (kind === "click" || kind === "button0" || kind === "close") return "start";
+    return "ignore";
+  }
+
   function buildDayRecord(store, extra = {}, now = new Date()) {
     const count = extra.count != null ? Number(extra.count) : readNumber(store, dailyCountKey(now), 0);
     const limit = extra.limit != null ? Number(extra.limit) : effectiveSearchLimit(store, now);
@@ -725,6 +737,31 @@
     return false;
   }
 
+  function isCrashPageTitle(title) {
+    return /此网页出现问题|This page is having a problem|Aw,\s*Snap!?|无法访问此页面|can'?t reach this page|BJ1EDGE/i.test(String(title || ""));
+  }
+
+  function isUnusableTabUrl(url) {
+    const text = String(url || "").toLowerCase();
+    return text.startsWith("chrome-error:") || text.startsWith("edge://crash") || text.startsWith("chrome://crash");
+  }
+
+  function isSleepingTab(tab) {
+    if (!tab) return false;
+    return tab.discarded === true || String(tab.status || "") === "unloaded";
+  }
+
+  function planSearchTabWake(tab, options = {}) {
+    if (!tab || typeof tab.id !== "number") return { action: "create", replaceUrl: false };
+    if (isUnusableTabUrl(tab.url) || isCrashPageTitle(tab.title)) return { action: "create", replaceUrl: false };
+    const foreground = options.foreground !== false;
+    const active = options.active === true;
+    if (isSleepingTab(tab) || (!foreground && !active)) {
+      return { action: "reload", replaceUrl: false };
+    }
+    return { action: "reuse", replaceUrl: false };
+  }
+
   function continueHint(model) {
     const resume = "点继续会接着今天的进度，不会从头搜。";
     if (!model) return resume;
@@ -759,13 +796,11 @@
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "3.4.0 失败也能看清进度",
+      title: "3.4.1 连续不加分也算完成",
       points: [
-        "点 Popup 上的周几，能看到那天搜了几次、加了多少分",
-        "设置页日志可以往前翻，查看前几天的记录",
-        "自动开始可设每天开始、仅工作日，或仅周六周日",
-        "暂时读不到登录状态时会继续搜索；恢复后重新计分，空转不计入连续没有加分",
-        "设置页顶部导航点击后，高亮和滚动位置会对准对应区块",
+        "连续几次搜索都没有加分时，视为今天的搜索已经满了，记为完成",
+        "点补做通知后会前台打开 Bing 并开始，不会只是通知消失",
+        "只有点「今天算了」才会跳过这次补做",
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
@@ -846,7 +881,25 @@
     const q = String(currentQuery || "").trim();
     const last = String(lastKeyword || "").trim();
     if (!q || !last) return false;
-    return q !== last;
+    if (q === last) return false;
+    if (q.startsWith(last) || last.startsWith(q)) return false;
+    return true;
+  }
+
+  function shouldIgnoreActivityEvent(type, isOurSearchBox) {
+    const eventType = String(type || "");
+    if (eventType === "focusin" || eventType === "wheel") return true;
+    if ((eventType === "keydown" || eventType === "input") && isOurSearchBox) return true;
+    return false;
+  }
+
+  function shouldCountSearchResult(submitted, currentQuery, lastCountedQuery) {
+    const q = String(currentQuery || "").trim();
+    const word = String(submitted || "").trim();
+    if (!q || !word) return false;
+    if (q !== word) return false;
+    if (q === String(lastCountedQuery || "").trim()) return false;
+    return true;
   }
 
   function shouldSkipAutoStart(store, now = new Date()) {
@@ -1047,6 +1100,13 @@
           : "找不到搜索框，页面可能已改版。已停止。"
       };
     }
+    if (code === FAIL_CODES.PAGE_UNRESPONSIVE) {
+      return {
+        short: "搜索页没有反应",
+        next: "点继续会再开一页接着搜",
+        message: extra.message || "搜索页崩溃或长时间没有反应。已停止。点继续会再开一页接着今天的进度。"
+      };
+    }
     if (code === FAIL_CODES.NETWORK) {
       return {
         short: "网络失败",
@@ -1058,6 +1118,33 @@
       short: "已停止",
       next: "可以继续今天的进度",
       message: extra.message || "已停止"
+    };
+  }
+
+  function isNoGainQuotaFull(consecutive, limit) {
+    const n = Number(consecutive);
+    const cap = Number(limit);
+    return Number.isFinite(n) && Number.isFinite(cap) && cap > 0 && n >= cap;
+  }
+
+  function fillSearchCountWhenQuotaFull(count, limit) {
+    const n = Math.max(0, Math.round(Number(count) || 0));
+    const cap = Math.max(0, Math.round(Number(limit) || 0));
+    if (cap <= 0) return n;
+    return Math.max(n, cap);
+  }
+
+  function searchFullCopy(kind, extra = {}) {
+    const limit = extra.limit || DEFAULT_NO_GAIN_LIMIT;
+    if (kind === "mobile") {
+      return {
+        short: "移动搜索已满",
+        message: `连续 ${limit} 次移动搜索没有加分，今天的移动搜索已经满了。`
+      };
+    }
+    return {
+      short: "电脑搜索已满",
+      message: `连续 ${limit} 次搜索没有加分，今天的电脑搜索已经满了。`
     };
   }
 
@@ -2325,6 +2412,7 @@
     DEFAULT_INTERVAL_MIN,
     DEFAULT_INTERVAL_MAX,
     BUSY_IDLE_MS,
+    IGNORE_BUSY_AFTER_SEARCH_MS,
     PRODUCT_VERSION,
     TRANSIENT_FAIL_CONFIRM_MISSES,
     ACCOUNT_CHANGE_CONFIRM_MISSES,
@@ -2376,6 +2464,8 @@
     readNumber,
     isLockOn,
     queryLooksLikeUserSearch,
+    shouldIgnoreActivityEvent,
+    shouldCountSearchResult,
     shouldSkipAutoStart,
     isPaused,
     normalizeRepeatRule,
@@ -2400,6 +2490,7 @@
     yesterdayMissed,
     streakLine,
     shouldRemindMissed,
+    catchUpNoteAction,
     buildDayRecord,
     continueHint,
     whatsNewCopy,
@@ -2417,12 +2508,19 @@
     parseKeywordText,
     buildKeywordPlan,
     failCopy,
+    isNoGainQuotaFull,
+    fillSearchCountWhenQuotaFull,
+    searchFullCopy,
     isMobileFailCode,
     isLoginFailCode,
     pointsLookLikeAccountChanged,
     hadLoginHistory,
     loginLooksLost,
     isUncertainLoginRead,
+    isCrashPageTitle,
+    isUnusableTabUrl,
+    isSleepingTab,
+    planSearchTabWake,
     isDangerEnabled,
     allowsHighRiskTasks,
     allowsQuizAssist,

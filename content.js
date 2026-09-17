@@ -47,7 +47,7 @@ function GM_getValue(key, defaultValue) {
 
 function GM_setValue(key, value) {
     rebangExtensionStore[key] = value;
-    BingAssistant.Storage.set({ [key]: value }).catch((error) => {
+    return BingAssistant.Storage.set({ [key]: value }).catch((error) => {
         console.error(`保存设置失败: ${key}`, error);
     });
 }
@@ -431,7 +431,7 @@ GM_addStyle(`
 
 // GM_getValue / GM_setValue 封装
 function getVal(key, defaultValue) { return GM_getValue(key, defaultValue); }
-function setVal(key, value) { GM_setValue(key, value); }
+function setVal(key, value) { return GM_setValue(key, value); }
 
 let simulatingTyping = false;
 let searchInFlight = false;
@@ -453,17 +453,8 @@ function currentIntervalRange() {
     );
 }
 
-function isEditableTarget(el) {
-    if (!el || el === document.body || el === document.documentElement) return false;
-    const tag = (el.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") return true;
-    if (el.isContentEditable) return true;
-    return false;
-}
-
 function isFullscreenNow() {
-    if (document.fullscreenElement) return true;
-    return window.innerHeight >= screen.height - 2 && window.innerWidth >= screen.width - 2;
+    return Boolean(document.fullscreenElement);
 }
 
 function isOurDrivenSearchBox(el) {
@@ -492,19 +483,18 @@ function hasRecentUserActivity(ms) {
 }
 
 function pageHasUserQuery() {
-    return BingAssistant.queryLooksLikeUserSearch(
+    if (simulatingTyping) return false;
+    if (!BingAssistant.queryLooksLikeUserSearch(
         currentSearchQuery(),
         getVal(BingAssistant.KEYS.lastKeyword, "")
-    );
-}
-
-function userOwnsThisResultsPage() {
-    return pageHasUserQuery() && document.hasFocus();
+    )) return false;
+    return hasRecentUserActivity(BingAssistant.BUSY_IDLE_MS);
 }
 
 function markTrustedUserActivity(event) {
     if (!event || event.isTrusted === false) return;
     if (isExtensionWidgetEvent(event)) return;
+    if (BingAssistant.shouldIgnoreActivityEvent(event.type, isOurDrivenSearchBox(event.target))) return;
     lastUserActivityAt = Date.now();
     if (simulatingTyping) abortSearchForUser = true;
 }
@@ -513,10 +503,7 @@ function isUserBusyNow() {
     if (Number(getVal(BingAssistant.KEYS.ignoreBusyUntil, 0)) > Date.now()) return false;
     if (getVal(BingAssistant.KEYS.pauseWhenBusy, true) === false) return false;
     if (isFullscreenNow()) return true;
-    const active = document.activeElement;
-    if (active && String(active.tagName || "").toLowerCase() === "iframe") return true;
-    if (isEditableTarget(active) && !(simulatingTyping && isOurDrivenSearchBox(active))) return true;
-    if (userOwnsThisResultsPage()) return true;
+    if (simulatingTyping) return false;
     return hasRecentUserActivity(BingAssistant.BUSY_IDLE_MS);
 }
 
@@ -531,14 +518,13 @@ function setUserTaskButtons(visible) {
     if (box.length) box.toggleClass("is-on", !!visible);
 }
 
-["keydown", "input", "pointerdown", "mousedown", "touchstart", "wheel", "focusin"].forEach((type) => {
+["keydown", "input", "pointerdown", "mousedown", "touchstart"].forEach((type) => {
     document.addEventListener(type, markTrustedUserActivity, true);
 });
 window.addEventListener("blur", () => {
     const active = document.activeElement;
-    if (active && String(active.tagName || "").toLowerCase() === "iframe") {
-        lastUserActivityAt = Date.now();
-        if (simulatingTyping) abortSearchForUser = true;
+    if (active && String(active.tagName || "").toLowerCase() === "iframe" && simulatingTyping) {
+        abortSearchForUser = true;
     }
 }, true);
 
@@ -581,67 +567,45 @@ function syncTabStatus() {
     let lastRun = Number(getVal(globalLockKey, 0));
     let masterId = getVal(globalMasterTabKey, "");
     let masterStatus = getVal(globalMasterStatusKey, "IDLE");
-
-    // 当前页面的搜索开关状态 ("on" 为正在跑, "off" 为停止/闲置)
+    let masterVisible = getVal(BingAssistant.KEYS.globalMasterVisible, false) === true;
     let mySwitchState = getVal(autoSearchLockKey, "off");
-
-    // 判定当前搜索页是否已经超过 15 秒没有动静
     let isMasterDead = (now - lastRun > 15000);
-
+    const iAmVisible = document.visibilityState === "visible";
+    const iShouldRun = mySwitchState === "on" && !isRunPaused();
     let isMaster = false;
 
-    // --- 场景 1: 我就是当前搜索页 ---
     if (pageHasUserQuery()) {
         if (masterId === currentTabId) {
             setVal(globalMasterTabKey, "");
             setVal(globalMasterStatusKey, "IDLE");
+            setVal(BingAssistant.KEYS.globalMasterVisible, false);
         }
         isMaster = false;
-    }
-    else if (masterId === currentTabId) {
+    } else if (masterId === currentTabId) {
         isMaster = true;
-        // 更新心跳
         setVal(globalLockKey, now);
-
-        // 【关键】: 把我当前的状态(忙碌还是闲置)广播出去
-        if (mySwitchState === "on") {
-            setVal(globalMasterStatusKey, "RUNNING");
-        } else {
-            // 我虽然是当前搜索页，但已经搜完或被手动停了，标记为 IDLE
-            setVal(globalMasterStatusKey, "IDLE");
-        }
-    }
-    // --- 场景 2: 别的搜索页正在跑 ---
-    else {
-        // 1. 当前搜索页已经没动静 (isMasterDead) -> 由这一页接着做
-        // 2. 当前搜索页还在，但处于闲置 (Status == IDLE) -> 由这一页接着做
-        if ((masterId === "" || isMasterDead || masterStatus === "IDLE") && !isUserBusyNow() && !pageHasUserQuery()) {
-
-            // 改由这一页负责搜索
-            setVal(globalMasterTabKey, currentTabId);
-            setVal(globalLockKey, now);
-            setVal(globalMasterStatusKey, mySwitchState === "on" ? "RUNNING" : "IDLE");
-
-            // 立即刷新UI状态
-            $("#ext-autosearch-lock").text("停止").addClass("stop");
-
-            isMaster = true;
-        } else {
-            // 当前搜索页正在 RUNNING 且没超时，这一页待机
-            isMaster = false;
-        }
+        setVal(BingAssistant.KEYS.globalMasterVisible, iAmVisible);
+        setVal(globalMasterStatusKey, iShouldRun ? "RUNNING" : "IDLE");
+    } else if (masterId === "" || isMasterDead || masterStatus === "IDLE" || (iShouldRun && iAmVisible && !masterVisible)) {
+        setVal(globalMasterTabKey, currentTabId);
+        setVal(globalLockKey, now);
+        setVal(BingAssistant.KEYS.globalMasterVisible, iAmVisible);
+        setVal(globalMasterStatusKey, iShouldRun ? "RUNNING" : "IDLE");
+        if (iShouldRun) $("#ext-autosearch-lock").text("停止").addClass("stop");
+        isMaster = true;
+    } else {
+        isMaster = false;
     }
 
-    // === UI 显示控制 ===
     if ($("#rebang-widget").length > 0) {
         $("#rebang-widget").show();
-        if (isMaster) {
-            const title = mySwitchState === "on" ? "Bing 积分助手" : "Bing 积分助手";
-            $("#rebang-title").text(title);
-            $("#rebang-widget").css("opacity", "1");
-        } else {
+        const otherTabRunning = !isMaster && masterId && masterId !== currentTabId && !isMasterDead && masterStatus === "RUNNING";
+        if (otherTabRunning) {
             $("#rebang-title").text("其他标签页正在运行");
             $("#rebang-widget").css("opacity", "0.7");
+        } else {
+            $("#rebang-title").text("Bing 积分助手");
+            $("#rebang-widget").css("opacity", "1");
         }
         updateMiniBar();
     }
@@ -959,7 +923,6 @@ function publishAssistantState() {
   if (snapshot === lastPublishedState) return;
   lastPublishedState = snapshot;
   const payload = {
-    [BingAssistant.KEYS.lastKeyword]: keyword,
     [BingAssistant.KEYS.lastStatusMessage]: ($("#ex-user-msg").text() || "").trim()
   };
   if (points !== null) {
@@ -1126,12 +1089,16 @@ async function performSearch(keyword) {
         return false;
     }
     const simulate = getVal(BingAssistant.KEYS.simulateTyping, false) === true;
+    let ok = false;
     if (simulate) {
-        const typed = await typeKeywordLikeHuman(keyword);
-        if (typed) return true;
-        if (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) return false;
+        ok = await typeKeywordLikeHuman(keyword);
+        if (!ok && (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused())) return false;
     }
-    return doSearch(keyword);
+    if (!ok) ok = doSearch(keyword);
+    if (ok) {
+        await setVal(BingAssistant.KEYS.ignoreBusyUntil, Date.now() + BingAssistant.IGNORE_BUSY_AFTER_SEARCH_MS);
+    }
+    return ok;
 }
 
 async function maybeHandleBusyPause() {
@@ -1252,6 +1219,36 @@ function currentSearchTrack() {
 
 function currentSearchPhase() {
     return getVal(BingAssistant.KEYS.searchPhase, "") || "pc";
+}
+
+function finishCurrentSearchTrack(currentPoints, extra) {
+    extra = extra || {};
+    const track = extra.track || currentSearchTrack();
+    const enableDaily = extra.enableDaily != null ? extra.enableDaily : dailyTasksWanted();
+    const dailyDone = extra.dailyDone != null
+        ? extra.dailyDone
+        : (getVal(getDailyTasksDoneKey(), false) === true || getVal(getDailyTasksDoneKey(), false) === "true");
+    const completeMessage = extra.completeMessage || (track.kind === "mobile" ? "移动搜索已完成" : "今天的电脑搜索已完成");
+
+    setVal(lastPointsKey, null);
+    setVal(globalMasterStatusKey, "IDLE");
+    if (track.kind === "mobile") {
+        setVal(BingAssistant.KEYS.mobileDoneDate, getLocalDateStr());
+        chrome.runtime.sendMessage({ type: "MOBILE_SEARCH_FINISHED" }).catch(() => {});
+        return true;
+    }
+    if (BingAssistant.shouldRunMobileSearch(rebangExtensionStore)) {
+        setVal(BingAssistant.KEYS.searchPhase, "mobile");
+        chrome.runtime.sendMessage({ type: "START_MOBILE_SEARCH" }).catch(() => {});
+        return true;
+    }
+    if (enableDaily && !dailyDone) {
+        setVal(BingAssistant.KEYS.searchPhase, "daily");
+        goToRewardsPage(extra.now || Date.now(), currentPoints);
+        return true;
+    }
+    stopAutoSearch(completeMessage, "complete");
+    return true;
 }
 
 function isQuizOrVotePage() {
@@ -2031,24 +2028,7 @@ async function doAutoSearch() {
   const currentSearchCountNow = Number(getVal(track.countKey, 0));
   const limitSearchCountNow = track.limit;
   if (currentSearchCountNow >= limitSearchCountNow) {
-      if (track.kind === "mobile") {
-          setVal(BingAssistant.KEYS.mobileDoneDate, getLocalDateStr());
-          chrome.runtime.sendMessage({ type: "MOBILE_SEARCH_FINISHED" }).catch(() => {});
-          return;
-      }
-      if (BingAssistant.shouldRunMobileSearch(rebangExtensionStore)) {
-          setVal(BingAssistant.KEYS.searchPhase, "mobile");
-          chrome.runtime.sendMessage({ type: "START_MOBILE_SEARCH" }).catch(() => {});
-          return;
-      }
-      if (enableDaily && !dailyDone) {
-          setVal(BingAssistant.KEYS.searchPhase, "daily");
-          goToRewardsPage(nowTime, currentPoints);
-          return;
-      }
-      setVal(lastPointsKey, null);
-      setVal(globalMasterStatusKey, "IDLE");
-      stopAutoSearch("今天的电脑搜索已完成", "complete");
+      finishCurrentSearchTrack(currentPoints, { track, enableDaily, dailyDone });
       return;
   }
 
@@ -2083,33 +2063,44 @@ async function doAutoSearch() {
     showUserMessage("登录已恢复，重新开始计算加分", { action: "登录已恢复", result: "空转不计入连续没有加分" });
   }
 
-  // 积分对比。读不到登录/积分时的空转不计入连续没有加分。
-  if (lastPoints !== null && currentPoints !== null && !uncertainRead && !recoveringRead) {
+  // 积分对比。没真正跳到搜索结果、或同一词重复尝试，不计入连续没有加分。
+  const submitted = String(getVal(BingAssistant.KEYS.searchSubmitted, "") || "").trim();
+  const canCount = BingAssistant.shouldCountSearchResult(
+    submitted,
+    currentSearchQuery(),
+    getVal(BingAssistant.KEYS.lastCountedQuery, "")
+  );
+  if (lastPoints !== null && currentPoints !== null && !uncertainRead && !recoveringRead && canCount) {
       let lastP = Number(lastPoints);
       if (track.kind !== "mobile" && BingAssistant.pointsLookLikeAccountChanged(lastP, currentPoints)) {
           stopForLogin(true, { accountChanged: true });
           return;
       }
+      setVal(BingAssistant.KEYS.lastCountedQuery, currentSearchQuery());
+      setVal(BingAssistant.KEYS.searchSubmitted, "");
       if (currentPoints > lastP) {
           currentSearchCount++;
           setVal(track.countKey, currentSearchCount);
           isPointsIncreased = true;
           setVal(consecutiveNoGainKey, 0);
-
-          // 【修复】积分涨了，说明当前页面正常，重置"换页重试计数"
           setVal(relayRetryKey, 0);
       } else {
           consecutiveNoGain++;
           setVal(consecutiveNoGainKey, consecutiveNoGain);
-
-          // 连续无积分保护逻辑
-          if (consecutiveNoGain >= maxNoGainLimit) {
-              if (track.kind === "mobile") {
-                  stopForReason(BingAssistant.FAIL_CODES.MOBILE_NO_GAIN, { limit: maxNoGainLimit });
-                  return;
+          if (BingAssistant.isNoGainQuotaFull(consecutiveNoGain, maxNoGainLimit)) {
+              const copy = BingAssistant.searchFullCopy(track.kind, { limit: maxNoGainLimit });
+              showUserMessage(copy.message, { action: copy.short, result: copy.message });
+              if (track.kind !== "mobile") {
+                  currentSearchCount = BingAssistant.fillSearchCountWhenQuotaFull(currentSearchCount, track.limit);
+                  setVal(track.countKey, currentSearchCount);
               }
-              const code = currentSearchCount === 0 ? BingAssistant.FAIL_CODES.RISK : BingAssistant.FAIL_CODES.NO_GAIN;
-              stopForReason(code, { limit: maxNoGainLimit });
+              finishCurrentSearchTrack(currentPoints, {
+                  track,
+                  enableDaily,
+                  dailyDone,
+                  now: nowTime,
+                  completeMessage: copy.message
+              });
               return;
           }
       }
@@ -2119,24 +2110,7 @@ async function doAutoSearch() {
 
   // 每日搜索次数限制
   if (currentSearchCount >= limitSearchCount) {
-      setVal(lastPointsKey, null);
-      setVal(globalMasterStatusKey, "IDLE");
-      if (track.kind === "mobile") {
-          setVal(BingAssistant.KEYS.mobileDoneDate, getLocalDateStr());
-          chrome.runtime.sendMessage({ type: "MOBILE_SEARCH_FINISHED" }).catch(() => {});
-          return;
-      }
-      if (BingAssistant.shouldRunMobileSearch(rebangExtensionStore)) {
-          setVal(BingAssistant.KEYS.searchPhase, "mobile");
-          chrome.runtime.sendMessage({ type: "START_MOBILE_SEARCH" }).catch(() => {});
-          return;
-      }
-      if (enableDaily && !dailyDone) {
-          setVal(BingAssistant.KEYS.searchPhase, "daily");
-          goToRewardsPage(Date.now(), currentPoints);
-          return;
-      }
-      stopAutoSearch("今天的电脑搜索已完成", "complete");
+      finishCurrentSearchTrack(currentPoints, { track, enableDaily, dailyDone, now: nowTime });
       return;
   }
 
@@ -2172,6 +2146,7 @@ async function doAutoSearch() {
     localStorage.setItem(currentKeywordIndexKey, currentKeywordIndex);
 
     const word = keywords[currentKeywordIndex - 1].title;
+    setVal(BingAssistant.KEYS.lastKeyword, word);
     let result = isPointsIncreased
         ? `积分 +${currentPoints - Number(lastPoints)}`
         : (lastPoints !== null ? `这次没有加分（${consecutiveNoGain}/${maxNoGainLimit}）` : "");
@@ -2191,6 +2166,7 @@ async function doAutoSearch() {
     const startedIndex = currentKeywordIndex;
     try {
       const ok = await performSearch(word);
+      if (ok) setVal(BingAssistant.KEYS.searchSubmitted, word);
       if (!ok && isRunPaused()) {
         localStorage.setItem(currentKeywordIndexKey, String(startedIndex - 1));
       }

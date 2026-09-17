@@ -175,9 +175,10 @@
       </label>
       <p class="help">全屏、正在输入，或正在用这个必应页面（包括翻译框）时会先停下。大约 1 分钟没有操作后才会自动继续。</p>
       <label class="row">
-        <span>连续没有积分时停止</span>
+        <span>连续没有积分时视为已满</span>
         <input type="number" id="no-gain-limit" min="3" max="30" step="1">
       </label>
+      <p class="help">连续几次搜索都没有加分，就证明今天的搜索已经满了，记为完成。</p>
       <label class="row">
         <span>每日活动重试次数</span>
         <input type="number" id="daily-retries" min="1" max="10" step="1">
@@ -236,13 +237,12 @@
 
     <section id="about-settings">
       <h2>这个版本</h2>
-      <p id="whats-new-title">3.4.0 失败也能看清进度</p>
+      <p id="whats-new-title">3.4.1 连续不加分也算完成</p>
       <ul id="whats-new-points">
-        <li>点 Popup 上的周几，能看到那天搜了几次、加了多少分</li>
-        <li>设置页日志可以往前翻，查看前几天的记录</li>
-        <li>自动开始可设每天开始、仅工作日，或仅周六周日</li>
-        <li>暂时读不到登录状态时会继续搜索；恢复后重新计分，空转不计入连续没有加分</li>
-        <li>设置页顶部导航点击后，高亮和滚动位置会对准对应区块</li>
+        <li>连续几次搜索都没有加分时，视为今天的搜索已经满了，记为完成</li>
+        <li>点补做通知后会前台打开 Bing 并开始，不会只是通知消失</li>
+        <li>只有点「今天算了」才会跳过这次补做</li>
+        <li>默认仍是安全模式，只做电脑搜索；权限和产品名不变</li>
       </ul>
     </section>
 

@@ -58,6 +58,9 @@ async function focusWindowIfNeeded(windowId, foreground) {
 const QUIET_WATCHDOG_ALARM = "rebang-quiet-watchdog";
 const QUIET_STUCK_AFTER_MS = 45000;
 const QUIET_HEARTBEAT_STALE_MS = 20000;
+const QUIET_RELOAD_AFTER_MS = 60000;
+const QUIET_FAIL_AFTER_MS = 180000;
+let lastQuietReviveAt = 0;
 
 async function clearQuietWatchdog() {
   try {
@@ -91,14 +94,39 @@ async function activateTabWithoutFocus(tabId) {
   }
 }
 
+function isUnusableTab(tab) {
+  if (!tab) return true;
+  if (A.isUnusableTabUrl(tab.url)) return true;
+  if (A.isCrashPageTitle(tab.title)) return true;
+  return false;
+}
+
+async function getTabSafe(tabId) {
+  if (typeof tabId !== "number") return null;
+  try {
+    return await chrome.tabs.get(tabId);
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function reloadTab(tabId) {
+  if (typeof tabId !== "number") return false;
+  try {
+    await chrome.tabs.reload(tabId, { bypassCache: true });
+    return true;
+  } catch (error) {
+    A.warn("reloadTab", error);
+    return false;
+  }
+}
+
 async function findWorkingTabId(store) {
   if (store[KEYS.searchPhase] === "mobile") {
     const mobileId = Number(store[KEYS.mobileSearchTabId] || 0);
     if (mobileId) {
-      try {
-        const tab = await chrome.tabs.get(mobileId);
-        if (tab && typeof tab.id === "number") return tab.id;
-      } catch (error) { A.warn("getMobileTab", error); }
+      const tab = await getTabSafe(mobileId);
+      if (tab && typeof tab.id === "number" && !isUnusableTab(tab)) return tab.id;
     }
   }
   const queryUrls = store[KEYS.searchPhase] === "daily"
@@ -106,10 +134,15 @@ async function findWorkingTabId(store) {
     : ["*://*.bing.com/search*"];
   try {
     const tabs = await chrome.tabs.query({ url: queryUrls });
-    const tab = tabs.find((item) => typeof item.id === "number");
+    const tab = tabs.find((item) => typeof item.id === "number" && !isUnusableTab(item));
     if (tab) return tab.id;
   } catch (error) { A.warn("findWorkingTab", error); }
   return 0;
+}
+
+async function openFreshWorkingTab(store) {
+  if (store[KEYS.searchPhase] === "daily") return openOrWakeRewardsTab({ foreground: false });
+  return openOrWakeSearchTab({ foreground: false });
 }
 
 async function nudgeQuietTabIfStuck() {
@@ -120,30 +153,79 @@ async function nudgeQuietTabIfStuck() {
   if (store[KEYS.waitingUserTask]) return;
   const now = Date.now();
   const startedAt = Number(store[KEYS.runStartedAt] || 0);
-  if (startedAt && now - startedAt < QUIET_STUCK_AFTER_MS - 5000) return;
-  const lastRun = Number(store[KEYS.globalLastRunTime] || 0);
-  if (lastRun > 0 && now - lastRun < QUIET_HEARTBEAT_STALE_MS) return;
-  let tabId = await findWorkingTabId(store);
-  if (!tabId) {
-    if (store[KEYS.searchPhase] === "daily") tabId = await openOrWakeRewardsTab({ foreground: false });
-    else tabId = await openOrWakeSearchTab({ foreground: false });
+  if (startedAt && now - startedAt < QUIET_STUCK_AFTER_MS - 5000) {
+    await scheduleQuietWatchdog();
+    return;
   }
-  const activated = await activateTabWithoutFocus(tabId);
-  if (!activated) return;
+  const lastRun = Number(store[KEYS.globalLastRunTime] || 0);
+  if (lastRun > 0 && now - lastRun < QUIET_HEARTBEAT_STALE_MS) {
+    await scheduleQuietWatchdog();
+    return;
+  }
+  const heartbeatAt = lastRun > 0 ? lastRun : startedAt;
+  const stuckFor = heartbeatAt ? now - heartbeatAt : QUIET_STUCK_AFTER_MS;
+  if (stuckFor >= QUIET_FAIL_AFTER_MS) {
+    await failToday(A.FAIL_CODES.PAGE_UNRESPONSIVE);
+    return;
+  }
+
+  let tabId = await findWorkingTabId(store);
+  const tab = await getTabSafe(tabId);
+  const unusable = isUnusableTab(tab) || Boolean(tab && tab.discarded === true);
+  const stillLoading = Boolean(tab && tab.status === "loading");
+  let action = "搜索标签没有动静，已切到该标签";
+  let result = "窗口没有抢到最前";
+  const canRevive = now - lastQuietReviveAt >= 50000;
+
+  if (!stillLoading && (unusable || stuckFor >= QUIET_RELOAD_AFTER_MS) && canRevive) {
+    lastQuietReviveAt = now;
+    if (tabId && tab && !A.isUnusableTabUrl(tab.url) && await reloadTab(tabId)) {
+      await activateTabWithoutFocus(tabId);
+      action = "搜索页没有反应，已刷新";
+      result = unusable ? "页面已崩溃" : "搜索页长时间没动静";
+    } else {
+      tabId = await openFreshWorkingTab(store);
+      action = "搜索页没有反应，已新开一页";
+      result = unusable ? "原页面已崩溃" : "没找到可用搜索页";
+    }
+  } else {
+    if (!tabId) tabId = await openFreshWorkingTab(store);
+    const activated = await activateTabWithoutFocus(tabId);
+    if (!activated) {
+      await scheduleQuietWatchdog();
+      return;
+    }
+  }
+
   await A.Storage.set({
-    [KEYS.runLogs]: withLog(store, { action: "搜索标签没有动静，已切到该标签", result: "窗口没有抢到最前" })
+    [KEYS.runLogs]: withLog(store, { action, result })
   });
+  await scheduleQuietWatchdog();
+}
+
+async function keepTabAwake(tabId) {
+  if (typeof tabId !== "number") return;
+  try {
+    await chrome.tabs.update(tabId, { autoDiscardable: false });
+  } catch (error) { A.warn("keepTabAwake", error); }
 }
 
 async function openOrWakeTab(queryUrls, navigateUrl, options = {}) {
   const foreground = wantsForeground(options);
   const tabs = await chrome.tabs.query({ url: queryUrls });
-  const usableTab = tabs.find((tab) => typeof tab.id === "number");
+  const usableTab = tabs.find((tab) => typeof tab.id === "number" && !isUnusableTab(tab));
   if (usableTab) {
     const active = await shouldActivateInWindow(usableTab.windowId, foreground);
-    const update = { active };
-    if (options.replaceUrl && navigateUrl) update.url = navigateUrl;
-    await chrome.tabs.update(usableTab.id, update);
+    const plan = options.planWake
+      ? options.planWake(usableTab, { foreground, active })
+      : { action: options.replaceUrl ? "replace" : "reuse", replaceUrl: !!options.replaceUrl };
+    await keepTabAwake(usableTab.id);
+    if (plan.action === "reload") {
+      await reloadTab(usableTab.id);
+    } else if (plan.replaceUrl && navigateUrl) {
+      await chrome.tabs.update(usableTab.id, { url: navigateUrl });
+    }
+    if (active) await chrome.tabs.update(usableTab.id, { active: true });
     await focusWindowIfNeeded(usableTab.windowId, foreground);
     return usableTab.id;
   }
@@ -152,12 +234,17 @@ async function openOrWakeTab(queryUrls, navigateUrl, options = {}) {
   const createInfo = { url: navigateUrl, active };
   if (typeof last?.id === "number") createInfo.windowId = last.id;
   const created = await chrome.tabs.create(createInfo);
+  await keepTabAwake(created.id);
   await focusWindowIfNeeded(created.windowId, foreground);
   return created.id;
 }
 
 async function openOrWakeSearchTab(options = {}) {
-  return openOrWakeTab(["*://*.bing.com/search*"], A.SEARCH_URL, { ...options, replaceUrl: true });
+  return openOrWakeTab(["*://*.bing.com/search*"], A.SEARCH_URL, {
+    ...options,
+    replaceUrl: false,
+    planWake: A.planSearchTabWake
+  });
 }
 
 async function openOrWakeRewardsTab(options = {}) {
@@ -303,6 +390,7 @@ async function startMobileSearch(options = {}) {
     [KEYS.mobileSearchTabId]: tabId,
     [KEYS.globalMasterTabId]: "",
     [KEYS.globalMasterStatus]: "IDLE",
+    [KEYS.globalMasterVisible]: false,
     [KEYS.globalLastRunTime]: 0,
     [KEYS.autoSearchLockExpires]: 0,
     [KEYS.consecutiveNoGain]: 0,
@@ -441,8 +529,10 @@ async function completeTodayFromBackground(store, message) {
 const CATCHUP_NOTE_ID = "bing-assistant-catchup";
 const MISSED_NOTE_ID = "bing-assistant-missed";
 const CATCHUP_BUTTONS = [{ title: "现在补做" }, { title: "今天算了" }];
+const catchUpNoteHandled = new Set();
 
 async function notify(id, message, extra = {}) {
+  if (id === CATCHUP_NOTE_ID || id === MISSED_NOTE_ID) catchUpNoteHandled.delete(id);
   const store = await readStore();
   if (extra.force !== true && store[KEYS.notifyEnabled] === false) return;
   const options = {
@@ -498,9 +588,11 @@ async function dismissToday(now = new Date()) {
 async function startFromPrompt(reason = "catchup") {
   const now = new Date();
   await markPromptedToday(now);
-  const result = await startToday(reason);
+  const result = await startToday(reason, { foreground: true });
   if (result.ok) {
     await A.Storage.set({ [A.triggeredKey(now)]: "true" });
+  } else if (result && result.error) {
+    void notify("bing-assistant-start", result.error, { force: true });
   }
   return result;
 }
@@ -594,18 +686,21 @@ function syncGoalPatch(goal) {
   };
 }
 
-async function startToday(reason = "manual") {
-  return withRunGate(() => startTodayUnlocked(reason));
+async function startToday(reason = "manual", options = {}) {
+  return withRunGate(() => startTodayUnlocked(reason, options));
 }
 
-async function startTodayUnlocked(reason = "manual") {
+async function startTodayUnlocked(reason = "manual", options = {}) {
+  options = options || {};
   await clearQuietWatchdog();
+  lastQuietReviveAt = 0;
   const store = await readStore();
+  const foreground = options.foreground === true
+    || (options.foreground !== false && reason !== "alarm" && reason !== "catchup" && reason !== "missed");
   if (A.isLockOn(store)) {
-    if (reason === "manual" && A.isPaused(store)) return resumeTodayUnlocked();
+    if (reason === "manual" || options.foreground === true) return resumeTodayUnlocked();
     return { ok: true };
   }
-  const foreground = reason !== "alarm" && reason !== "catchup" && reason !== "missed";
   if (store[KEYS.riskAccepted] !== true) {
     return { ok: false, error: "请先确认使用风险" };
   }
@@ -630,9 +725,12 @@ async function startTodayUnlocked(reason = "manual") {
     [KEYS.autoSearchLock]: "on",
     [KEYS.globalMasterTabId]: "",
     [KEYS.globalMasterStatus]: "IDLE",
+    [KEYS.globalMasterVisible]: false,
     [KEYS.globalLastRunTime]: 0,
     [KEYS.consecutiveNoGain]: 0,
     [KEYS.noGainHold]: false,
+    [KEYS.searchSubmitted]: "",
+    [KEYS.lastCountedQuery]: "",
     [KEYS.jumpFailCount]: 0,
     [KEYS.jumpLastPoints]: -1,
     [KEYS.rewardsFailCount]: 0,
@@ -648,7 +746,8 @@ async function startTodayUnlocked(reason = "manual") {
     [KEYS.searchPhase]: model.count >= model.limit && model.mobilePending ? "mobile" : (model.count >= model.limit ? "daily" : "pc"),
     [A.triggeredKey()]: "true",
     [KEYS.runLogs]: withLog(store, { action }),
-    ...clearRunFlags()
+    ...clearRunFlags(),
+    [KEYS.ignoreBusyUntil]: Date.now() + 20000
   });
 
   if (model.count >= model.limit && model.mobilePending) {
@@ -732,18 +831,30 @@ async function resumeTodayUnlocked(options = {}) {
   if (!A.isLockOn(store)) {
     return startTodayUnlocked("manual");
   }
-  const ignoreBusyMs = options.ignoreBusyMs != null ? Number(options.ignoreBusyMs) : 8000;
+  const ignoreBusyMs = options.ignoreBusyMs != null ? Number(options.ignoreBusyMs) : 20000;
+  const ignoreUntil = Date.now() + (options.silent ? Math.max(0, ignoreBusyMs) : Math.max(20000, ignoreBusyMs));
   await A.Storage.set({
     [KEYS.paused]: false,
     [KEYS.pauseReason]: "",
     [KEYS.productState]: "running",
-    [KEYS.ignoreBusyUntil]: Date.now() + Math.max(0, ignoreBusyMs),
+    [KEYS.globalMasterTabId]: options.silent ? store[KEYS.globalMasterTabId] : "",
+    [KEYS.globalMasterStatus]: options.silent ? store[KEYS.globalMasterStatus] : "IDLE",
+    [KEYS.globalMasterVisible]: options.silent ? store[KEYS.globalMasterVisible] : false,
+    [KEYS.autoSearchLockExpires]: options.silent ? store[KEYS.autoSearchLockExpires] : 0,
+    [KEYS.ignoreBusyUntil]: ignoreUntil,
     [KEYS.lastStatusMessage]: "继续今天的任务",
     [KEYS.runLogs]: options.silent ? store[KEYS.runLogs] : withLog(store, { action: "继续今天的任务" })
   });
   const next = await readStore();
-  if (next[KEYS.searchPhase] === "mobile" && A.shouldRunMobileSearch(next)) {
-    await startMobileSearch({ foreground: true });
+  if (!options.silent) {
+    if (next[KEYS.searchPhase] === "mobile" && A.shouldRunMobileSearch(next)) {
+      await startMobileSearch({ foreground: true });
+    } else if (next[KEYS.searchPhase] === "daily") {
+      await openOrWakeRewardsTab({ foreground: true });
+    } else {
+      await openOrWakeSearchTab({ foreground: true });
+    }
+    await scheduleQuietWatchdog();
   }
   await updateBadge();
   return { ok: true };
@@ -869,21 +980,32 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   void startDailyRun("alarm").finally(scheduleNextAlarm);
 });
 
+function handleCatchUpNote(id, kind) {
+  const action = A.catchUpNoteAction(kind, catchUpNoteHandled.has(id));
+  if (action === "ignore") return;
+  catchUpNoteHandled.add(id);
+  try { void chrome.notifications.clear(id); } catch (_error) {}
+  if (action === "dismiss") {
+    void dismissToday();
+    return;
+  }
+  void startFromPrompt(id === MISSED_NOTE_ID ? "missed" : "catchup");
+}
+
 chrome.notifications.onClicked.addListener((id) => {
   if (id !== CATCHUP_NOTE_ID && id !== MISSED_NOTE_ID) return;
-  void startFromPrompt(id === MISSED_NOTE_ID ? "missed" : "catchup");
+  handleCatchUpNote(id, "click");
 });
 
 chrome.notifications.onButtonClicked.addListener((id, buttonIndex) => {
   if (id !== CATCHUP_NOTE_ID && id !== MISSED_NOTE_ID) return;
-  if (buttonIndex === 0) void startFromPrompt(id === MISSED_NOTE_ID ? "missed" : "catchup");
-  else void dismissToday();
+  handleCatchUpNote(id, buttonIndex === 0 ? "button0" : "button1");
 });
 
 chrome.notifications.onClosed.addListener((id, byUser) => {
   if (!byUser) return;
   if (id !== CATCHUP_NOTE_ID && id !== MISSED_NOTE_ID) return;
-  void dismissToday();
+  setTimeout(() => handleCatchUpNote(id, "close"), 80);
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
