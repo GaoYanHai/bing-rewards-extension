@@ -119,9 +119,7 @@ function fill(store) {
   setIfIdle(scheduleEnabled, model.schedule.enabled, true);
   setIfIdle(
     scheduleTime,
-    model.schedule.enabled
-      ? A.formatClock(model.schedule.hour, model.schedule.minute)
-      : `${A.pad2(A.SUGGESTED_HOUR)}:${A.pad2(A.SUGGESTED_MINUTE)}`
+    A.formatClock(model.schedule.rememberedHour, model.schedule.rememberedMinute)
   );
   nextRun.textContent = model.schedule.enabled
     ? `下次启动：${model.nextRunLabel}`
@@ -191,21 +189,46 @@ async function save(partial) {
   await A.Storage.set(partial);
 }
 
-scheduleEnabled.addEventListener("change", async () => {
-  if (!scheduleEnabled.checked) {
-    await save({
-      [A.KEYS.autoStartHour]: "-1",
-      [A.KEYS.autoStartMin]: "-1",
-      [A.triggeredKey()]: "false"
-    });
-    return;
+function readScheduleInput() {
+  const [hour, minute] = String(scheduleTime.value || "").split(":");
+  const parsed = A.parseHourMinute(hour, minute);
+  if (parsed.enabled) return parsed;
+  return { enabled: false, hour: A.SUGGESTED_HOUR, minute: A.SUGGESTED_MINUTE };
+}
+
+async function saveSchedulePatch(enabled, parsed) {
+  let next = parsed;
+  if (!parsed.enabled) {
+    next = A.rememberedSchedule(await A.Storage.get([
+      A.KEYS.autoStartHour,
+      A.KEYS.autoStartMin,
+      A.KEYS.lastAutoStartHour,
+      A.KEYS.lastAutoStartMin
+    ]));
   }
-  const [hour, minute] = (scheduleTime.value || "21:30").split(":");
-  await save({
-    [A.KEYS.autoStartHour]: String(Number(hour)),
-    [A.KEYS.autoStartMin]: String(Number(minute)),
+  const hour = String(next.hour);
+  const minute = String(next.minute);
+  const patch = {
     [A.triggeredKey()]: "false"
-  });
+  };
+  if (enabled) {
+    patch[A.KEYS.autoStartHour] = hour;
+    patch[A.KEYS.autoStartMin] = minute;
+    patch[A.KEYS.lastAutoStartHour] = hour;
+    patch[A.KEYS.lastAutoStartMin] = minute;
+  } else {
+    patch[A.KEYS.autoStartHour] = "-1";
+    patch[A.KEYS.autoStartMin] = "-1";
+    if (parsed.enabled || next.enabled) {
+      patch[A.KEYS.lastAutoStartHour] = hour;
+      patch[A.KEYS.lastAutoStartMin] = minute;
+    }
+  }
+  return save(patch);
+}
+
+scheduleEnabled.addEventListener("change", async () => {
+  await saveSchedulePatch(scheduleEnabled.checked, readScheduleInput());
 });
 
 repeatRule.addEventListener("change", () => save({ [A.KEYS.repeatRule]: A.normalizeRepeatRule(repeatRule.value) }));
@@ -228,12 +251,7 @@ scheduleTime.addEventListener("change", async () => {
   if (!scheduleEnabled.checked) {
     scheduleEnabled.checked = true;
   }
-  const [hour, minute] = (scheduleTime.value || "21:30").split(":");
-  await save({
-    [A.KEYS.autoStartHour]: String(Number(hour)),
-    [A.KEYS.autoStartMin]: String(Number(minute)),
-    [A.triggeredKey()]: "false"
-  });
+  await saveSchedulePatch(true, readScheduleInput());
 });
 
 todayGoal.addEventListener("change", () => send("SET_TODAY_GOAL", { goal: todayGoal.value }));

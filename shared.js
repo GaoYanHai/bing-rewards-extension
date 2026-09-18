@@ -146,6 +146,8 @@
     lastPoints: "Rebang_LastPoints",
     autoStartHour: "Rebang_AutoStartHour",
     autoStartMin: "Rebang_AutoStartMin",
+    lastAutoStartHour: "Rebang_LastAutoStartHour",
+    lastAutoStartMin: "Rebang_LastAutoStartMin",
     limitSearchCount: "Rebang_LimitSearchCount",
     globalLastRunTime: "Rebang_GlobalLastRunTime",
     globalMasterTabId: "Rebang_GlobalMasterTabId",
@@ -336,6 +338,14 @@
     const enabled = Number.isInteger(hour) && hour >= 0 && hour <= 23 &&
       Number.isInteger(minute) && minute >= 0 && minute <= 59;
     return { enabled, hour: enabled ? hour : -1, minute: enabled ? minute : -1 };
+  }
+
+  function rememberedSchedule(store = {}) {
+    const current = parseHourMinute(store[KEYS.autoStartHour], store[KEYS.autoStartMin]);
+    if (current.enabled) return current;
+    const last = parseHourMinute(store[KEYS.lastAutoStartHour], store[KEYS.lastAutoStartMin]);
+    if (last.enabled) return last;
+    return { enabled: false, hour: SUGGESTED_HOUR, minute: SUGGESTED_MINUTE };
   }
 
   function nextScheduledTime(hour, minute, now = new Date(), rule = REPEAT.DAILY) {
@@ -1884,6 +1894,8 @@
   const SETTINGS_EXPORT_KEYS = [
     KEYS.autoStartHour,
     KEYS.autoStartMin,
+    KEYS.lastAutoStartHour,
+    KEYS.lastAutoStartMin,
     KEYS.repeatRule,
     KEYS.todayGoal,
     KEYS.enableDailyTasks,
@@ -1989,6 +2001,18 @@
       } else {
         patch[KEYS.autoStartHour] = String(parsed.hour);
         patch[KEYS.autoStartMin] = String(parsed.minute);
+        patch[KEYS.lastAutoStartHour] = String(parsed.hour);
+        patch[KEYS.lastAutoStartMin] = String(parsed.minute);
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.lastAutoStartHour) || Object.prototype.hasOwnProperty.call(patch, KEYS.lastAutoStartMin)) {
+      const last = parseHourMinute(patch[KEYS.lastAutoStartHour], patch[KEYS.lastAutoStartMin]);
+      if (!last.enabled) {
+        delete patch[KEYS.lastAutoStartHour];
+        delete patch[KEYS.lastAutoStartMin];
+      } else {
+        patch[KEYS.lastAutoStartHour] = String(last.hour);
+        patch[KEYS.lastAutoStartMin] = String(last.minute);
       }
     }
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.limitSearchCount)) {
@@ -2073,6 +2097,7 @@
     const riskAccepted = store[KEYS.riskAccepted] === true;
     const notifyEnabled = store[KEYS.notifyEnabled] !== false;
     const schedule = parseHourMinute(store[KEYS.autoStartHour], store[KEYS.autoStartMin]);
+    const remembered = rememberedSchedule(store);
     const repeatRule = normalizeRepeatRule(store[KEYS.repeatRule]);
     const interval = normalizeIntervalRange(store[KEYS.searchIntervalMin], store[KEYS.searchIntervalMax]);
     const startedAt = readNumber(store, KEYS.runStartedAt, 0);
@@ -2150,7 +2175,12 @@
       dailyResult: formatDailyResult(dailySummary, dailyEnabled),
       taskCards: taskList.cards,
       waitingTask,
-      schedule: { ...schedule, rule: repeatRule },
+      schedule: {
+        ...schedule,
+        rule: repeatRule,
+        rememberedHour: remembered.hour,
+        rememberedMinute: remembered.minute
+      },
       repeatRule,
       repeatLabel: REPEAT_LABELS[repeatRule] || REPEAT_LABELS.daily,
       nextRunLabel: formatNextRunLabel(store[KEYS.autoStartHour], store[KEYS.autoStartMin], now, repeatRule),
@@ -2503,6 +2533,7 @@
     dailyTasksDoneKey,
     pad2,
     parseHourMinute,
+    rememberedSchedule,
     nextScheduledTime,
     formatClock,
     formatNextRunLabel,
