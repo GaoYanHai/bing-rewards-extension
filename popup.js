@@ -331,7 +331,7 @@ primaryBtn.addEventListener("click", async () => {
     else if (action === "login" || action === "open") result = await send("OPEN_BING");
     else result = await send("START_TODAY");
     await refresh();
-    if (result && result.disconnected && result.error) hint.textContent = result.error;
+    if (result && result.ok === false && result.error) hint.textContent = result.error;
   } finally {
     primaryBtn.disabled = false;
   }

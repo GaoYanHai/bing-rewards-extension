@@ -26,8 +26,15 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         key.indexOf("Rebang_AutoSearchCount_") === 0 ||
         key.indexOf("Rebang_MobileSearchCount_") === 0 ||
         key === BingAssistant.KEYS.searchPhase ||
-        key === BingAssistant.KEYS.mobileDoneDate
+        key === BingAssistant.KEYS.mobileDoneDate ||
+        key === BingAssistant.KEYS.manualContinue
     );
+    if (changes[BingAssistant.KEYS.autoSearchLock] && changes[BingAssistant.KEYS.autoSearchLock].newValue === "on") {
+        if (rebangExtensionStore[BingAssistant.KEYS.manualContinue] === true) {
+            try { localStorage.setItem("Rebang_CurrentKeywordIndex", "0"); } catch (_error) {}
+        }
+        if (typeof doAutoSearch === "function" && !BingAssistant.isRewardsPage(location)) void doAutoSearch();
+    }
     if (changes[BingAssistant.KEYS.dailyKeywordPlan] || changes[BingAssistant.KEYS.blockedKeywords] || changes[BingAssistant.KEYS.selectedChannel] || changes[BingAssistant.KEYS.keywordShuffle]) {
         try { sessionStorage.removeItem(getCurrentChannelKeywordsCacheKey()); } catch (error) { BingAssistant.warn("clearSessionCache", error); }
         if (typeof initKeywords === "function" && $("#ext-keywords-list").length) initKeywords();
@@ -1980,9 +1987,10 @@ async function doAutoSearch() {
   if (!isMaster) {
       return;
   }
+  const manualContinue = getVal(BingAssistant.KEYS.manualContinue, false) === true;
   const phase = currentSearchPhase();
   if (phase === "mobile" && !isMobileSearchMode()) return;
-  if (phase === "daily") return;
+  if (phase === "daily" && !manualContinue) return;
   if (phase === "pc" && isMobileSearchMode()) return;
   if (document.querySelector("#rqStartQuiz, [id^=rqAnswerOption], .rqOption, .wk_Circle, .btOption, #quizCompleteContainer")) {
       const waiting = getVal(BingAssistant.KEYS.waitingUserTask, null);
@@ -2037,7 +2045,6 @@ async function doAutoSearch() {
 
   const currentSearchCountNow = Number(getVal(track.countKey, 0));
   const limitSearchCountNow = track.limit;
-  const manualContinue = getVal(BingAssistant.KEYS.manualContinue, false) === true;
   if (currentSearchCountNow >= limitSearchCountNow && !manualContinue) {
       finishCurrentSearchTrack(currentPoints, { track, enableDaily, dailyDone });
       return;
@@ -2053,6 +2060,7 @@ async function doAutoSearch() {
       requestSearchWake(jobLockExpires);
       return;
   }
+  setVal(autoSearchLockExpiresKey, Date.now() + 15000);
 
   let lastPoints = getVal(lastPointsKey, null);
   let currentSearchCount = Number(getVal(track.countKey, 0));
@@ -2186,7 +2194,7 @@ async function doAutoSearch() {
       searchInFlight = false;
     }
   } else {
-    // 如果没有关键词或搜完了
+    setVal(autoSearchLockExpiresKey, 0);
     if (!keywords) {
         initKeywords();
     } else {
@@ -2545,37 +2553,18 @@ function initSearchControls() {
       }
       stopAutoSearch("已停止", "stopped");
     } else {
-        let limit = todaySearchLimit();
-        let current = Number(getVal(getAutoSearchCountKey(), 0));
-        let dailyEnabled = dailyTasksWanted();
-        let dailyDone = getVal(getDailyTasksDoneKey(), false);
-
-        const quotaDone = current >= limit && (!dailyEnabled || dailyDone);
-        if (detectLoginState() === "out") {
-            showUserMessage("暂时没读到登录状态，先按已登录开始。");
-        }
-
-        setVal(autoSearchLockKey, "on");
-        setVal(getAutoStartTriggeredKey(), "true");
-        setVal(BingAssistant.KEYS.manualContinue, quotaDone);
-        setVal(BingAssistant.KEYS.searchPhase, "pc");
-        setVal(consecutiveNoGainKey, 0);
-        setVal(jumpFailCountKey, 0);
-        setVal(jumpLastPointsKey, -1);
-        setVal(rewardsFailCountKey, 0);
-        setVal(globalMasterTabKey, currentTabId);
-        setVal(globalLockKey, Date.now());
-        setVal(BingAssistant.KEYS.productState, "running");
-        setVal(BingAssistant.KEYS.runStartedAt, Date.now());
-        setVal(BingAssistant.KEYS.paused, false);
-        setVal(BingAssistant.KEYS.pauseReason, "");
-        rememberStartPoints(getBingPoints());
         $(this).text("停止").addClass("stop");
         showUserMessage("正在开始今天的任务", { action: "开始今日任务" });
-        setVal(autoSearchLockExpiresKey, 0);
-        setVal(lastPointsKey, null);
-        updateMiniBar();
-        doAutoSearch();
+        localStorage.setItem(currentKeywordIndexKey, "0");
+        chrome.runtime.sendMessage({ type: "START_TODAY" }).then((result) => {
+            if (result && result.ok === false && result.error) {
+                showUserMessage(result.error);
+                updateMiniBar();
+            }
+        }).catch(() => {
+            showUserMessage("暂时没法开始，请再点一次");
+            updateMiniBar();
+        });
     }
   });
 }

@@ -763,12 +763,12 @@ async function startTodayUnlocked(reason = "manual", options = {}) {
     [KEYS.lastStatusMessage]: action,
     [KEYS.searchPhase]: model.count >= model.limit && model.mobilePending
       ? "mobile"
-      : (model.count >= model.limit && model.dailyEnabled && !model.dailyDone ? "daily" : "pc"),
+      : (reason !== "manual" && model.count >= model.limit && model.dailyEnabled && !model.dailyDone ? "daily" : "pc"),
     [A.triggeredKey()]: "true",
     [KEYS.runLogs]: withLog(store, { action }),
     ...clearRunFlags(),
     [KEYS.ignoreBusyUntil]: Date.now() + 20000,
-    [KEYS.manualContinue]: reason === "manual" && quotaDone
+    [KEYS.manualContinue]: reason === "manual"
   });
 
   if (model.count >= model.limit && model.mobilePending) {
@@ -777,7 +777,7 @@ async function startTodayUnlocked(reason = "manual", options = {}) {
     await updateBadge();
     return started;
   }
-  if (model.count >= model.limit && model.dailyEnabled && !model.dailyDone) {
+  if (reason !== "manual" && model.count >= model.limit && model.dailyEnabled && !model.dailyDone) {
     await openOrWakeRewardsTab({ foreground });
   } else {
     await openOrWakeSearchTab({ foreground });
