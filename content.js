@@ -1950,6 +1950,16 @@ async function handleRewardsPage() {
     }
 }
 
+let wakeRequestedFor = 0;
+function requestSearchWake(at) {
+  const when = Number(at) || 0;
+  if (!when || when === wakeRequestedFor) return;
+  wakeRequestedFor = when;
+  try {
+    chrome.runtime.sendMessage({ type: "SEARCH_WAKE", at: when }).catch(() => {});
+  } catch (_error) {}
+}
+
 async function doAutoSearch() {
   if (searchInFlight) return;
   if (await maybeHandleBusyPause()) {
@@ -2027,7 +2037,8 @@ async function doAutoSearch() {
 
   const currentSearchCountNow = Number(getVal(track.countKey, 0));
   const limitSearchCountNow = track.limit;
-  if (currentSearchCountNow >= limitSearchCountNow) {
+  const manualContinue = getVal(BingAssistant.KEYS.manualContinue, false) === true;
+  if (currentSearchCountNow >= limitSearchCountNow && !manualContinue) {
       finishCurrentSearchTrack(currentPoints, { track, enableDaily, dailyDone });
       return;
   }
@@ -2039,6 +2050,7 @@ async function doAutoSearch() {
       let secondsLeft = Math.ceil((jobLockExpires - now) / 1000);
       const range = currentIntervalRange();
       showUserMessage(`正在模拟常规搜索，间隔 ${range.min}-${range.max} 秒（还剩 ${secondsLeft} 秒）`);
+      requestSearchWake(jobLockExpires);
       return;
   }
 
@@ -2060,7 +2072,7 @@ async function doAutoSearch() {
       lastPoints = currentPoints;
       setVal(lastPointsKey, currentPoints);
     }
-    showUserMessage("登录已恢复，重新开始计算加分", { action: "登录已恢复", result: "空转不计入连续没有加分" });
+    showUserMessage("已重新开始计算加分", { action: "重新计分", result: "空转不计入连续没有加分" });
   }
 
   // 积分对比。没真正跳到搜索结果、或同一词重复尝试，不计入连续没有加分。
@@ -2079,8 +2091,10 @@ async function doAutoSearch() {
       setVal(BingAssistant.KEYS.lastCountedQuery, currentSearchQuery());
       setVal(BingAssistant.KEYS.searchSubmitted, "");
       if (currentPoints > lastP) {
-          currentSearchCount++;
-          setVal(track.countKey, currentSearchCount);
+          if (currentSearchCount < track.limit) {
+              currentSearchCount++;
+              setVal(track.countKey, currentSearchCount);
+          }
           isPointsIncreased = true;
           setVal(consecutiveNoGainKey, 0);
           setVal(relayRetryKey, 0);
@@ -2090,10 +2104,6 @@ async function doAutoSearch() {
           if (BingAssistant.isNoGainQuotaFull(consecutiveNoGain, maxNoGainLimit)) {
               const copy = BingAssistant.searchFullCopy(track.kind, { limit: maxNoGainLimit });
               showUserMessage(copy.message, { action: copy.short, result: copy.message });
-              if (track.kind !== "mobile") {
-                  currentSearchCount = BingAssistant.fillSearchCountWhenQuotaFull(currentSearchCount, track.limit);
-                  setVal(track.countKey, currentSearchCount);
-              }
               finishCurrentSearchTrack(currentPoints, {
                   track,
                   enableDaily,
@@ -2108,8 +2118,8 @@ async function doAutoSearch() {
 
   let limitSearchCount = track.limit;
 
-  // 每日搜索次数限制
-  if (currentSearchCount >= limitSearchCount) {
+  // 每日搜索次数限制。手动再开始时即使次数已满也继续搜，直到连续不加分。
+  if (currentSearchCount >= limitSearchCount && !manualContinue) {
       finishCurrentSearchTrack(currentPoints, { track, enableDaily, dailyDone, now: nowTime });
       return;
   }
@@ -2123,7 +2133,9 @@ async function doAutoSearch() {
   // 设置下次搜索的随机延迟 (8-14秒)，使用时间戳存储
   const range = currentIntervalRange();
   let randomDelay = BingAssistant.randomSearchDelayMs(range.min, range.max);
-  setVal(autoSearchLockExpiresKey, Date.now() + randomDelay);
+  const nextSearchAt = Date.now() + randomDelay;
+  setVal(autoSearchLockExpiresKey, nextSearchAt);
+  requestSearchWake(nextSearchAt);
 
   // 获取关键词并执行搜索
   let currentKeywordIndex = Number(localStorage.getItem(currentKeywordIndexKey) ?? 0);
@@ -2503,7 +2515,9 @@ function initSearchControls() {
   if (savedWord) currentKeywordLabel = savedWord;
   updateMiniBar();
 
-  if (currentSearchCount >= limitSearchCount) { setVal(autoSearchLockKey, "off"); }
+  if (currentSearchCount >= limitSearchCount && getVal(autoSearchLockKey, "off") !== "on") {
+      setVal(autoSearchLockKey, "off");
+  }
 
   $("#ext-keywords-refresh").off("click.rebang").on("click.rebang", function () {
       setVal(BingAssistant.KEYS.keywordShuffle, Number(getVal(BingAssistant.KEYS.keywordShuffle, 0)) + 1);
@@ -2536,16 +2550,15 @@ function initSearchControls() {
         let dailyEnabled = dailyTasksWanted();
         let dailyDone = getVal(getDailyTasksDoneKey(), false);
 
-        if (current >= limit && (!dailyEnabled || dailyDone)) {
-            showUserMessage("今天的任务已经完成");
-            return;
-        }
+        const quotaDone = current >= limit && (!dailyEnabled || dailyDone);
         if (detectLoginState() === "out") {
             showUserMessage("暂时没读到登录状态，先按已登录开始。");
         }
 
         setVal(autoSearchLockKey, "on");
         setVal(getAutoStartTriggeredKey(), "true");
+        setVal(BingAssistant.KEYS.manualContinue, quotaDone);
+        setVal(BingAssistant.KEYS.searchPhase, "pc");
         setVal(consecutiveNoGainKey, 0);
         setVal(jumpFailCountKey, 0);
         setVal(jumpLastPointsKey, -1);

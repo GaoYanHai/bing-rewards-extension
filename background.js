@@ -56,10 +56,7 @@ async function focusWindowIfNeeded(windowId, foreground) {
 }
 
 const QUIET_WATCHDOG_ALARM = "rebang-quiet-watchdog";
-const QUIET_STUCK_AFTER_MS = 45000;
-const QUIET_HEARTBEAT_STALE_MS = 20000;
-const QUIET_RELOAD_AFTER_MS = 60000;
-const QUIET_FAIL_AFTER_MS = 180000;
+const SEARCH_WAKE_ALARM = "rebang-search-wake";
 let lastQuietReviveAt = 0;
 
 async function clearQuietWatchdog() {
@@ -68,11 +65,32 @@ async function clearQuietWatchdog() {
   } catch (error) { A.warn("clearWatchdog", error); }
 }
 
-async function scheduleQuietWatchdog() {
+async function scheduleQuietWatchdog(delayMs) {
   await clearQuietWatchdog();
+  const delay = Math.max(5000, Math.round(Number(delayMs) || A.QUIET_STUCK_AFTER_MS));
   try {
-    await chrome.alarms.create(QUIET_WATCHDOG_ALARM, { when: Date.now() + QUIET_STUCK_AFTER_MS });
+    await chrome.alarms.create(QUIET_WATCHDOG_ALARM, { when: Date.now() + delay });
   } catch (error) { A.warn("scheduleWatchdog", error); }
+}
+
+async function scheduleSearchWake(at) {
+  const when = Number(at) || 0;
+  const now = Date.now();
+  if (when <= now + 500) {
+    await wakeSearchTabQuietly();
+    return;
+  }
+  try {
+    await chrome.alarms.create(SEARCH_WAKE_ALARM, { when });
+  } catch (error) { A.warn("scheduleSearchWake", error); }
+}
+
+async function wakeSearchTabQuietly() {
+  const store = await readStore();
+  if (!A.isLockOn(store) || store[KEYS.paused] === true || store[KEYS.productState] !== "running") return;
+  if (store[KEYS.waitingUserTask]) return;
+  const tabId = await findWorkingTabId(store);
+  if (tabId) await activateTabWithoutFocus(tabId);
 }
 
 async function activateTabWithoutFocus(tabId) {
@@ -147,60 +165,58 @@ async function openFreshWorkingTab(store) {
 
 async function nudgeQuietTabIfStuck() {
   const store = await readStore();
-  if (!A.isLockOn(store)) return;
-  if (store[KEYS.paused] === true) return;
-  if (store[KEYS.productState] !== "running") return;
-  if (store[KEYS.waitingUserTask]) return;
-  const now = Date.now();
-  const startedAt = Number(store[KEYS.runStartedAt] || 0);
-  if (startedAt && now - startedAt < QUIET_STUCK_AFTER_MS - 5000) {
-    await scheduleQuietWatchdog();
+  const plan = A.quietWatchdogPlan(store);
+  if (plan.action === "idle") return;
+  if (plan.action === "wait") {
+    await scheduleQuietWatchdog(plan.delayMs);
     return;
   }
-  const lastRun = Number(store[KEYS.globalLastRunTime] || 0);
-  if (lastRun > 0 && now - lastRun < QUIET_HEARTBEAT_STALE_MS) {
-    await scheduleQuietWatchdog();
-    return;
-  }
-  const heartbeatAt = lastRun > 0 ? lastRun : startedAt;
-  const stuckFor = heartbeatAt ? now - heartbeatAt : QUIET_STUCK_AFTER_MS;
-  if (stuckFor >= QUIET_FAIL_AFTER_MS) {
+  if (plan.action === "fail") {
     await failToday(A.FAIL_CODES.PAGE_UNRESPONSIVE);
     return;
   }
 
+  const now = Date.now();
   let tabId = await findWorkingTabId(store);
   const tab = await getTabSafe(tabId);
   const unusable = isUnusableTab(tab) || Boolean(tab && tab.discarded === true);
   const stillLoading = Boolean(tab && tab.status === "loading");
-  let action = "搜索标签没有动静，已切到该标签";
-  let result = "窗口没有抢到最前";
   const canRevive = now - lastQuietReviveAt >= 50000;
+  const shouldReload = plan.action === "reload" || unusable;
 
-  if (!stillLoading && (unusable || stuckFor >= QUIET_RELOAD_AFTER_MS) && canRevive) {
+  if (!stillLoading && shouldReload && canRevive) {
     lastQuietReviveAt = now;
+    let action = "搜索页没有反应，已刷新";
+    let result = unusable ? "页面已崩溃" : "搜索页长时间没动静";
     if (tabId && tab && !A.isUnusableTabUrl(tab.url) && await reloadTab(tabId)) {
       await activateTabWithoutFocus(tabId);
-      action = "搜索页没有反应，已刷新";
-      result = unusable ? "页面已崩溃" : "搜索页长时间没动静";
     } else {
       tabId = await openFreshWorkingTab(store);
       action = "搜索页没有反应，已新开一页";
       result = unusable ? "原页面已崩溃" : "没找到可用搜索页";
     }
-  } else {
-    if (!tabId) tabId = await openFreshWorkingTab(store);
-    const activated = await activateTabWithoutFocus(tabId);
-    if (!activated) {
-      await scheduleQuietWatchdog();
-      return;
-    }
+    await A.Storage.set({
+      [KEYS.noGainHold]: true,
+      [KEYS.searchSubmitted]: "",
+      [KEYS.runLogs]: withLog(store, { action, result })
+    });
+    await scheduleQuietWatchdog();
+    return;
   }
 
-  await A.Storage.set({
-    [KEYS.runLogs]: withLog(store, { action, result })
-  });
-  await scheduleQuietWatchdog();
+  if (!tabId) {
+    lastQuietReviveAt = now;
+    tabId = await openFreshWorkingTab(store);
+    await A.Storage.set({
+      [KEYS.noGainHold]: true,
+      [KEYS.searchSubmitted]: "",
+      [KEYS.runLogs]: withLog(store, { action: "搜索页没有反应，已新开一页", result: "没找到可用搜索页" })
+    });
+    await scheduleQuietWatchdog();
+    return;
+  }
+  await activateTabWithoutFocus(tabId);
+  await scheduleQuietWatchdog(shouldReload && !canRevive ? 15000 : A.QUIET_STUCK_AFTER_MS);
 }
 
 async function keepTabAwake(tabId) {
@@ -607,7 +623,8 @@ function clearRunFlags() {
     [KEYS.pauseReason]: "",
     [KEYS.userTaskAction]: "",
     [KEYS.userTaskConfirmTries]: 0,
-    [KEYS.ignoreBusyUntil]: 0
+    [KEYS.ignoreBusyUntil]: 0,
+    [KEYS.manualContinue]: false
   };
 }
 
@@ -709,7 +726,8 @@ async function startTodayUnlocked(reason = "manual", options = {}) {
     return { ok: false, error: "请先登录微软账号" };
   }
   const model = A.buildViewModel(store);
-  if (model.count >= model.limit && !model.mobilePending && (!model.dailyEnabled || model.dailyDone)) {
+  const quotaDone = model.count >= model.limit && !model.mobilePending && (!model.dailyEnabled || model.dailyDone);
+  if (A.isAutoStartReason(reason) && quotaDone) {
     await A.Storage.set({ [KEYS.productState]: "complete" });
     await updateBadge();
     return { ok: false, error: "今天的任务已经完成" };
@@ -743,11 +761,14 @@ async function startTodayUnlocked(reason = "manual", options = {}) {
     [KEYS.runStartedAt]: Date.now(),
     [KEYS.runStartPoints]: startPoints,
     [KEYS.lastStatusMessage]: action,
-    [KEYS.searchPhase]: model.count >= model.limit && model.mobilePending ? "mobile" : (model.count >= model.limit ? "daily" : "pc"),
+    [KEYS.searchPhase]: model.count >= model.limit && model.mobilePending
+      ? "mobile"
+      : (model.count >= model.limit && model.dailyEnabled && !model.dailyDone ? "daily" : "pc"),
     [A.triggeredKey()]: "true",
     [KEYS.runLogs]: withLog(store, { action }),
     ...clearRunFlags(),
-    [KEYS.ignoreBusyUntil]: Date.now() + 20000
+    [KEYS.ignoreBusyUntil]: Date.now() + 20000,
+    [KEYS.manualContinue]: reason === "manual" && quotaDone
   });
 
   if (model.count >= model.limit && model.mobilePending) {
@@ -972,6 +993,10 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === SEARCH_WAKE_ALARM) {
+    void wakeSearchTabQuietly();
+    return;
+  }
   if (alarm.name === QUIET_WATCHDOG_ALARM) {
     void nudgeQuietTabIfStuck();
     return;
@@ -1018,6 +1043,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const type = message && message.type;
+  if (type === "SEARCH_WAKE") {
+    scheduleSearchWake(message.at).then(() => sendResponse({ ok: true }));
+    return true;
+  }
   if (type === "ACCEPT_RISK") {
     A.Storage.set({ [KEYS.riskAccepted]: true }).then(() => sendResponse({ ok: true }));
     return true;
@@ -1182,6 +1211,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         [KEYS.lastRunSummary]: summary,
         [KEYS.lastStatusMessage]: message.message || copy.message,
         [KEYS.autoSearchLock]: "off",
+        [KEYS.manualContinue]: false,
         [KEYS.waitingUserTask]: null,
         [A.triggeredKey()]: "true",
         [KEYS.runLogs]: withLog(store, {

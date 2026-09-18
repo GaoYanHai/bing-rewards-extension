@@ -28,7 +28,11 @@
   const DEFAULT_INTERVAL_MAX = 14;
   const BUSY_IDLE_MS = 60000;
   const IGNORE_BUSY_AFTER_SEARCH_MS = 20000;
-  const PRODUCT_VERSION = "3.4.1";
+  const PRODUCT_VERSION = "3.4.2";
+  const QUIET_STUCK_AFTER_MS = 45000;
+  const QUIET_HEARTBEAT_STALE_MS = 20000;
+  const QUIET_RELOAD_AFTER_MS = 60000;
+  const QUIET_FAIL_AFTER_MS = 180000;
   const TRANSIENT_FAIL_CONFIRM_MISSES = 8;
   const ACCOUNT_CHANGE_CONFIRM_MISSES = 3;
   const DAY_RECORD_KEEP_DAYS = 35;
@@ -136,6 +140,7 @@
     autoSearchLockExpires: "Rebang_AutoSearchLockExpires",
     consecutiveNoGain: "Rebang_ConsecutiveNoGainCount",
     noGainHold: "Rebang_NoGainHold",
+    manualContinue: "Rebang_ManualContinue",
     searchSubmitted: "Rebang_SearchSubmitted",
     lastCountedQuery: "Rebang_LastCountedQuery",
     lastPoints: "Rebang_LastPoints",
@@ -796,11 +801,11 @@
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "3.4.1 连续不加分也算完成",
+      title: "3.4.2 后台等待时不再误刷新",
       points: [
-        "连续几次搜索都没有加分时，视为今天的搜索已经满了，记为完成",
-        "点补做通知后会前台打开 Bing 并开始，不会只是通知消失",
-        "只有点「今天算了」才会跳过这次补做",
+        "搜索间隔等待时不再当成卡住，也不会反复刷新搜索页",
+        "今天完成后不会再自动开始，但手动点开始仍会继续搜",
+        "刷新后重新计分，空转不计入连续没有加分",
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
@@ -902,6 +907,39 @@
     return true;
   }
 
+  function quietWatchdogPlan(store, now = Date.now()) {
+    const ts = Number(now) || Date.now();
+    if (!store || !isLockOn(store)) return { action: "idle" };
+    if (store[KEYS.paused] === true) return { action: "idle" };
+    if (store[KEYS.productState] !== "running") return { action: "idle" };
+    if (store[KEYS.waitingUserTask]) return { action: "idle" };
+
+    const expires = Number(store[KEYS.autoSearchLockExpires] || 0);
+    const lastRun = Number(store[KEYS.globalLastRunTime] || 0);
+    const startedAt = Number(store[KEYS.runStartedAt] || 0);
+
+    if (startedAt && ts - startedAt < QUIET_STUCK_AFTER_MS - 5000) {
+      return { action: "wait", delayMs: QUIET_STUCK_AFTER_MS, reason: "starting" };
+    }
+    if (expires > ts) {
+      return {
+        action: "wait",
+        delayMs: Math.min(QUIET_STUCK_AFTER_MS, Math.max(5000, expires - ts + 1500)),
+        reason: "cooldown"
+      };
+    }
+    if (lastRun > 0 && ts - lastRun < QUIET_HEARTBEAT_STALE_MS) {
+      return { action: "wait", delayMs: QUIET_STUCK_AFTER_MS, reason: "heartbeat" };
+    }
+
+    const expectedAt = Math.max(expires || 0, lastRun || 0, startedAt || 0);
+    const overdueMs = expectedAt ? ts - expectedAt : QUIET_STUCK_AFTER_MS;
+    if (overdueMs >= QUIET_FAIL_AFTER_MS) return { action: "fail", overdueMs };
+    if (overdueMs >= QUIET_RELOAD_AFTER_MS) return { action: "reload", overdueMs };
+    if (overdueMs >= QUIET_HEARTBEAT_STALE_MS) return { action: "nudge", overdueMs };
+    return { action: "wait", delayMs: QUIET_STUCK_AFTER_MS, reason: "grace" };
+  }
+
   function shouldSkipAutoStart(store, now = new Date()) {
     if (!store) return true;
     if (isLockOn(store)) return true;
@@ -914,6 +952,10 @@
       }
     }
     return false;
+  }
+
+  function isAutoStartReason(reason) {
+    return reason === "alarm" || reason === "catchup" || reason === "missed";
   }
 
   function normalizeWordPack(value) {
@@ -2413,6 +2455,10 @@
     DEFAULT_INTERVAL_MAX,
     BUSY_IDLE_MS,
     IGNORE_BUSY_AFTER_SEARCH_MS,
+    QUIET_STUCK_AFTER_MS,
+    QUIET_HEARTBEAT_STALE_MS,
+    QUIET_RELOAD_AFTER_MS,
+    QUIET_FAIL_AFTER_MS,
     PRODUCT_VERSION,
     TRANSIENT_FAIL_CONFIRM_MISSES,
     ACCOUNT_CHANGE_CONFIRM_MISSES,
@@ -2466,7 +2512,9 @@
     queryLooksLikeUserSearch,
     shouldIgnoreActivityEvent,
     shouldCountSearchResult,
+    quietWatchdogPlan,
     shouldSkipAutoStart,
+    isAutoStartReason,
     isPaused,
     normalizeRepeatRule,
     isScheduledDay,

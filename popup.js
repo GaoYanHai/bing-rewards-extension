@@ -262,15 +262,16 @@ function render(store) {
     stat2Value.textContent = model.dailyResult;
     stat3Label.textContent = "用时";
     stat3Value.textContent = duration ? A.formatDuration(duration) : "已完成";
-    primaryBtn.textContent = "打开 Bing";
+    primaryBtn.textContent = "再开始";
     const bits = [];
     if (gained) bits.push(`大约 +${gained}`);
     bits.push(model.summary?.closingLine || model.closingLine);
     if (model.streakDays > 0) bits.push(model.streakLine);
     else if (model.weekCompleteLine) bits.push(model.weekCompleteLine);
     if (model.completeQuotaHint) bits.push(model.completeQuotaHint);
+    bits.push("自动开始不会再跑。想继续搜，点再开始。");
     hint.textContent = bits.filter(Boolean).join("。");
-    primaryBtn.dataset.action = "open";
+    primaryBtn.dataset.action = "start";
     return;
   }
 

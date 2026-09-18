@@ -178,7 +178,7 @@
         <span>连续没有积分时视为已满</span>
         <input type="number" id="no-gain-limit" min="3" max="30" step="1">
       </label>
-      <p class="help">连续几次搜索都没有加分，就证明今天的搜索已经满了，记为完成。</p>
+      <p class="help">连续几次搜索都没有加分，就证明今天的搜索已经满了。刷新页面或暂时读不到登录时不计入。</p>
       <label class="row">
         <span>每日活动重试次数</span>
         <input type="number" id="daily-retries" min="1" max="10" step="1">
@@ -237,11 +237,11 @@
 
     <section id="about-settings">
       <h2>这个版本</h2>
-      <p id="whats-new-title">3.4.1 连续不加分也算完成</p>
+      <p id="whats-new-title">3.4.2 后台等待时不再误刷新</p>
       <ul id="whats-new-points">
-        <li>连续几次搜索都没有加分时，视为今天的搜索已经满了，记为完成</li>
-        <li>点补做通知后会前台打开 Bing 并开始，不会只是通知消失</li>
-        <li>只有点「今天算了」才会跳过这次补做</li>
+        <li>搜索间隔等待时不再当成卡住，也不会反复刷新搜索页</li>
+        <li>今天完成后不会再自动开始，但手动点开始仍会继续搜</li>
+        <li>刷新后重新计分，空转不计入连续没有加分</li>
         <li>默认仍是安全模式，只做电脑搜索；权限和产品名不变</li>
       </ul>
     </section>
