@@ -752,6 +752,23 @@
     return false;
   }
 
+  function isSignInLabel(text) {
+    return /^(登录|登入|sign[\s-]*in)$/i.test(String(text || "").replace(/\s+/g, " ").trim());
+  }
+
+  function identityLoginState(signals) {
+    signals = signals || {};
+    if (readablePoints(signals.points) !== null) return "in";
+    const name = String(signals.name || "").replace(/\s+/g, " ").trim();
+    if (name && name !== "..." && !isSignInLabel(name)) return "in";
+    const accountLabel = String(signals.accountLabel || "").replace(/\s+/g, " ").trim();
+    if (accountLabel && /account manager|microsoft account|查看帐户|查看账户|帐户管理|账户管理|已登录/i.test(accountLabel) && !isSignInLabel(accountLabel)) return "in";
+    if (signals.hasAvatar || signals.hasAccountButton) return "in";
+    if (signals.headerSignInVisible || signals.signInWall) return "out";
+    if (signals.knownSignedIn) return "in";
+    return "unknown";
+  }
+
   function isCrashPageTitle(title) {
     return /此网页出现问题|This page is having a problem|Aw,\s*Snap!?|无法访问此页面|can'?t reach this page|BJ1EDGE/i.test(String(title || ""));
   }
@@ -2596,6 +2613,7 @@
     hadLoginHistory,
     loginLooksLost,
     isUncertainLoginRead,
+    identityLoginState,
     isCrashPageTitle,
     isUnusableTabUrl,
     isSleepingTab,

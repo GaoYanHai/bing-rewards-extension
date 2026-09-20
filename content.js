@@ -713,9 +713,18 @@ function getSearchPagePoints() {
         if (txt && /\d/.test(txt)) return parsePointsText(txt);
     }
 
-    let $mobilePoints = $("#fly_id_rc, .points-value, [aria-label*='Rewards'], [aria-label*='积分']").first();
+    let $mobilePoints = $("#fly_id_rc, .points-value, #id_rh").first();
     if ($mobilePoints.length > 0) {
-        const parsed = parsePointsText($mobilePoints.text() || $mobilePoints.attr("aria-label"));
+        const parsed = parsePointsText($mobilePoints.text() || $mobilePoints.attr("aria-label") || $mobilePoints.attr("title"));
+        if (parsed != null) return parsed;
+    }
+
+    const header = document.querySelector("#id_h, #b_header, header") || document;
+    const labeled = header.querySelectorAll("[aria-label], [title]");
+    for (const el of labeled) {
+        const label = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""}`;
+        if (!/reward|积分|奖励/i.test(label)) continue;
+        const parsed = parsePointsText(label);
         if (parsed != null) return parsed;
     }
 
@@ -833,20 +842,80 @@ function getCurrentChannel() {
   return value;
 }
 
+function headerHasAvatar() {
+  const nodes = document.querySelectorAll("#id_p, #id_a img, .id_avatar, mee-profile img, img.profile-image, .msame_Header_pic");
+  for (const el of nodes) {
+    if (el.getAttribute && el.getAttribute("src")) return true;
+    const style = `${el.getAttribute && el.getAttribute("style") || ""} ${(el.style && el.style.backgroundImage) || ""}`;
+    if (/url\(/i.test(style)) return true;
+    if (el.querySelector && el.querySelector("img[src], [style*='background-image']")) return true;
+  }
+  const account = document.querySelector("#id_a");
+  if (!account) return false;
+  const style = `${account.getAttribute("style") || ""} ${(account.style && account.style.backgroundImage) || ""}`;
+  return /url\(/i.test(style);
+}
+
+function headerHasAccountButton() {
+  const el = document.querySelector("#id_a, #id_a_hb, #mectrl_main_trigger");
+  if (!el) return false;
+  const href = String(el.getAttribute("href") || "").toLowerCase();
+  if (/login\.live\.com|login\.microsoftonline/.test(href)) return false;
+  const label = `${el.getAttribute("aria-label") || ""} ${el.textContent || ""}`.replace(/\s+/g, " ").trim();
+  if (/^(登录|登入|sign[\s-]*in)$/i.test(label)) return false;
+  return true;
+}
+
+function readAccountLabel() {
+  const direct = ($("#id_a, #id_a_hb, #mectrl_main_trigger").first().attr("aria-label") || $("#id_a").attr("title") || "").trim();
+  if (direct) return direct;
+  const header = document.querySelector("#id_h, #b_header, header");
+  if (!header) return "";
+  const nodes = header.querySelectorAll("[aria-label], [title]");
+  for (const el of nodes) {
+    const label = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""}`.trim();
+    if (/account manager|microsoft account|查看帐户|查看账户|帐户管理|账户管理|已登录/i.test(label)) return label;
+  }
+  return "";
+}
+
+function headerSignInVisible() {
+  const idNodes = document.querySelectorAll("#id_s, #id_l");
+  for (const el of idNodes) {
+    if (typeof isVisibleElement === "function" && !isVisibleElement(el)) continue;
+    const label = `${el.textContent || ""} ${el.getAttribute("aria-label") || ""}`.trim();
+    if (!label || /登录|sign in/i.test(label) || el.id === "id_s" || el.id === "id_l") return true;
+  }
+  const header = document.querySelector("#id_h, #b_header, header, mee-rewards-user-status");
+  if (!header) return false;
+  const nodes = header.querySelectorAll("a, button");
+  for (const el of nodes) {
+    if (typeof isVisibleElement === "function" && !isVisibleElement(el)) continue;
+    const label = `${el.textContent || ""} ${el.getAttribute("aria-label") || ""}`.trim();
+    const href = String(el.getAttribute("href") || "").toLowerCase();
+    if (/登录|sign[\s-]*in/i.test(label) && (/login\.live\.com|login\.microsoftonline|signin/.test(href) || el.tagName === "BUTTON")) return true;
+  }
+  return false;
+}
+
 function detectLoginState() {
   const points = getBingPoints();
-  if (points !== null) return "in";
   const name = ($("#id_n, #id_n_f, .id_username, .b_idName").first().text() || "").trim();
-  if (name && name !== "..." && !/^(登录|sign in)$/i.test(name)) return "in";
-  const signIn = $("#id_s, #id_l, a[href*='login.live.com'], a[href*='signin'], a[href*='login.microsoftonline.com'], button[aria-label*='Sign in'], button[aria-label*='登录']").filter(function() {
-    if (typeof isVisibleElement === "function" && !isVisibleElement(this)) return false;
-    const label = (($(this).text() || "") + " " + ($(this).attr("aria-label") || "")).trim();
-    return /登录|sign in/i.test(label) || this.id === "id_s";
+  let signInWall = false;
+  if (BingAssistant.isRewardsPage(location) && points === null && !headerHasAvatar()) {
+    const snippet = ((document.body && document.body.innerText) || "").slice(0, 1500);
+    signInWall = /请登录|sign in to microsoft|sign in with microsoft/i.test(snippet);
+  }
+  return BingAssistant.identityLoginState({
+    points,
+    name,
+    accountLabel: readAccountLabel(),
+    hasAvatar: headerHasAvatar(),
+    hasAccountButton: headerHasAccountButton(),
+    knownSignedIn: hadLoginBefore(),
+    headerSignInVisible: headerSignInVisible(),
+    signInWall
   });
-  if (signIn.length > 0) return "out";
-  const snippet = ((document.body && document.body.innerText) || "").slice(0, 2500);
-  if (/请登录|sign in to microsoft|sign in with microsoft/i.test(snippet) && points === null) return "out";
-  return "unknown";
 }
 
 function hadLoginBefore() {
