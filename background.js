@@ -709,6 +709,9 @@ async function startToday(reason = "manual", options = {}) {
 
 async function startTodayUnlocked(reason = "manual", options = {}) {
   options = options || {};
+  if (reason === "missed") {
+    return { ok: false, error: "错过的搜索不能补做" };
+  }
   await clearQuietWatchdog();
   lastQuietReviveAt = 0;
   const store = await readStore();
@@ -727,7 +730,8 @@ async function startTodayUnlocked(reason = "manual", options = {}) {
   }
   const model = A.buildViewModel(store);
   const quotaDone = model.count >= model.limit && !model.mobilePending && (!model.dailyEnabled || model.dailyDone);
-  if (A.isAutoStartReason(reason) && quotaDone) {
+  const alreadyDone = quotaDone || A.isCompleteToday(store);
+  if (A.isAutoStartReason(reason) && alreadyDone) {
     await A.Storage.set({ [KEYS.productState]: "complete" });
     await updateBadge();
     return { ok: false, error: "今天的任务已经完成" };
@@ -962,14 +966,7 @@ async function catchUpIfNeeded() {
 }
 
 async function maybeRemindMissed() {
-  const store = await readStore();
-  if (!A.shouldRemindMissed(store)) return false;
-  await markPromptedToday();
-  await notify(MISSED_NOTE_ID, "昨天的电脑搜索还没做完，要现在补做吗？", {
-    force: true,
-    buttons: CATCHUP_BUTTONS
-  });
-  return true;
+  return false;
 }
 
 function refreshKeywordPlan(store) {
