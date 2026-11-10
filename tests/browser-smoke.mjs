@@ -14,6 +14,8 @@ async function waitForStore(worker, predicate, timeout = 40000) {
     if (predicate(store)) return store;
     await new Promise(resolve => setTimeout(resolve, 100));
   }
+  console.error("Extension state at timeout:", JSON.stringify(await worker.evaluate(() => chrome.storage.local.get(null))));
+  console.error("Tabs at timeout:", JSON.stringify(await worker.evaluate(() => chrome.tabs.query({}))));
   throw new Error("Timed out waiting for extension state");
 }
 const errors = [];
