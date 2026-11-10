@@ -1,4 +1,5 @@
 ﻿const BingAssistant = (() => {
+  const t = text => globalThis.BingI18n ? globalThis.BingI18n.t(text) : String(text ?? "");
   const PRODUCT_NAME_ZH = "Bing 积分助手";
   const PRODUCT_NAME_EN = "Bing Rewards Assistant";
   const SEARCH_URL = "https://www.bing.com/search?q=%E5%A4%A9%E6%B0%94%E9%A2%84%E6%8A%A5";
@@ -28,7 +29,7 @@
   const DEFAULT_INTERVAL_MAX = 14;
   const BUSY_IDLE_MS = 60000;
   const IGNORE_BUSY_AFTER_SEARCH_MS = 20000;
-  const PRODUCT_VERSION = "3.4.3";
+  const PRODUCT_VERSION = "3.4.4";
   const QUIET_STUCK_AFTER_MS = 45000;
   const QUIET_HEARTBEAT_STALE_MS = 20000;
   const QUIET_RELOAD_AFTER_MS = 60000;
@@ -161,6 +162,7 @@
     currentKeywordIndex: "Rebang_CurrentKeywordIndex",
     lastCheckDate: "Rebang_LastCheckDate",
     riskAccepted: "Rebang_RiskAccepted",
+    uiLanguage: "Rebang_UiLanguage",
     notifyEnabled: "Rebang_NotifyEnabled",
     runStartedAt: "Rebang_RunStartedAt",
     lastRunSummary: "Rebang_LastRunSummary",
@@ -829,11 +831,11 @@
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "3.4.3 搜索控制与定时修复",
+      title: "3.4.4 中英文界面",
       points: [
-        "首次手动开始会遵守搜索目标，完成后可手动再搜",
-        "输入中暂停或操作页面会取消本次搜索",
-        "补做开关和补做前询问对搜索页同样生效",
+        "界面支持中文和英语，可跟随浏览器或手动切换",
+        "保留已有设置、词库和运行记录，切换语言无需重新配置",
+        "日志、通知、设置和搜索页状态条同步使用界面语言",
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
@@ -1911,6 +1913,7 @@
   }
 
   const SETTINGS_EXPORT_KEYS = [
+    KEYS.uiLanguage,
     KEYS.autoStartHour,
     KEYS.autoStartMin,
     KEYS.lastAutoStartHour,
@@ -1993,6 +1996,9 @@
       const goal = normalizeGoal(Object.prototype.hasOwnProperty.call(patch, KEYS.todayGoal) ? patch[KEYS.todayGoal] : { [KEYS.enableDailyTasks]: patch[KEYS.enableDailyTasks] });
       patch[KEYS.todayGoal] = goal;
       patch[KEYS.enableDailyTasks] = goalEnablesDaily(goal);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, KEYS.uiLanguage)) {
+      patch[KEYS.uiLanguage] = ["en", "zh_CN"].includes(patch[KEYS.uiLanguage]) ? patch[KEYS.uiLanguage] : "auto";
     }
     if (Object.prototype.hasOwnProperty.call(patch, KEYS.weekendGoal)) {
       patch[KEYS.weekendGoal] = normalizeWeekendGoal(patch[KEYS.weekendGoal]);
@@ -2479,6 +2485,7 @@
   };
 
   return {
+    t,
     PRODUCT_NAME_ZH,
     PRODUCT_NAME_EN,
     SEARCH_URL,

@@ -269,6 +269,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 #interval-min,
 #interval-max { min-width: 74px; width: 74px; }
 #repeat-rule { min-width: 126px; }
+html[lang="en"] .row { flex-wrap: wrap; }
+html[lang="en"] .row > select { min-width: 220px; max-width: 100%; }
+html[lang="en"] #weekend-search-limit { width: 190px; }
 #backup-status:empty { display: none; }
 .month-grid {
   display: grid;

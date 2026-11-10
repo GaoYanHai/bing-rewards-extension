@@ -21,6 +21,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: npm run test:publish
+      - run: python store/prepare_listing.py --locale en-US
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
       - run: npm run pack

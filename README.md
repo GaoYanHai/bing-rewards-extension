@@ -1,6 +1,8 @@
 # Bing 积分助手
 
-面向 Edge / Chrome 的 Manifest V3 扩展，提供 Bing 搜索、每日活动辅助、定时执行和本机进度记录。当前源码版本 **3.4.3**；商店版本取决于审核进度。
+面向 Edge / Chrome 的 Manifest V3 扩展，提供 Bing 搜索、每日活动辅助、定时执行和本机进度记录。当前源码版本 **3.4.4**；商店版本取决于审核进度。
+
+[English documentation](README.en.md) · 中文界面与英语界面均可使用。在“设置 → 基础设置 → 界面语言”选择跟随浏览器、简体中文或 English；浏览器中文环境默认中文，其他环境默认英语。搜索词不会随界面语言被翻译。
 
 [Edge 商店安装](https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj) · [更新日志](CHANGELOG.md) · [隐私说明](PRIVACY.md) · [发布与故障恢复](store/README.md)
 
@@ -19,6 +21,7 @@
 
 | 功能 | 行为与限制 |
 | --- | --- |
+| 中英文界面 | 设置页、弹窗、Bing 状态条、系统通知及导出日志跟随语言选择；切换语言保留现有设置和记录。内置搜索词包仍保留原词，可输入英语自定义词。 |
 | 搜索与积分 | 读取页面积分变化记录有效搜索。默认间隔 8–14 秒，最短 8 秒；本地计数不是微软配额证明。 |
 | 暂停与继续 | 支持主动暂停，以及全屏/操作页面时暂停。模拟输入被打断后会取消本次提交。 |
 | 定时 | 支持每天、工作日、周末；浏览器运行时由后台闹钟启动。错过时间后可按设置补做今天或先询问。关机、休眠时无法执行。 |
@@ -90,10 +93,15 @@ pwsh -File store/publish.ps1 -Status
 首次提交新版本前，先在 Partner Center 确认无审核中的提交，再执行：
 
 ```powershell
-pwsh -File store/publish.ps1 .\bing-rewards-extension-3.4.3.zip -ConfirmStoreReady
+pwsh -File store/publish.ps1 .\bing-rewards-extension-3.4.4.zip -ConfirmStoreReady -UploadOnly
+python store/prepare_listing.py --locale en-US
+# 在 Partner Center 更新英语介绍、截图及标志，保存后复用已上传草稿提交：
+pwsh -File store/publish.ps1 .\bing-rewards-extension-3.4.4.zip
 ```
 
 超时后重跑同一个命令会续查已保存的操作，不会重新上传。不要删掉 `.edge-publish-state/` 来尝试解除排队。已有审核冲突或未知结果的恢复方式见 [发布说明](store/README.md)。
+
+同一个 ZIP 内包含 `_locales/en` 和 `_locales/zh_CN`，不要为英文商店页再上传另一个安装包。商店长介绍和截图必须通过 Partner Center 编辑，公开更新 API 不支持修改这些字段。英文素材源文件位于 [store/listings/en-US.json](store/listings/en-US.json)，实际界面截图位于 `store/screenshots/en/`。脚本会校验两种语言的包元数据，默认使用独立维护的英文审核说明。
 
 ## 权限与隐私
 

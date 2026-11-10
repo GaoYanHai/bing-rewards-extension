@@ -1,6 +1,6 @@
 ﻿"use strict";
 
-importScripts("shared.js");
+importScripts("i18n.js", "shared.js");
 
 const A = BingAssistant;
 const KEYS = A.KEYS;
@@ -13,7 +13,9 @@ function withRunGate(fn) {
 }
 
 async function readStore() {
-  return chrome.storage.local.get(null);
+  const store = await chrome.storage.local.get(null);
+  globalThis.BingI18n?.setLanguage(store[KEYS.uiLanguage]);
+  return store;
 }
 
 async function saveStore(patch) {
@@ -559,11 +561,11 @@ async function notify(id, message, extra = {}) {
   const options = {
     type: "basic",
     iconUrl: "icons/icon128.png",
-    title: A.PRODUCT_NAME_ZH,
-    message
+    title: A.t(A.PRODUCT_NAME_ZH),
+    message: A.t(message)
   };
   if (extra.buttons) {
-    options.buttons = extra.buttons;
+    options.buttons = extra.buttons.map(button => ({ ...button, title: A.t(button.title) }));
     options.requireInteraction = true;
   }
   try {
@@ -1161,7 +1163,7 @@ async function handleMessage(message, _sender, sendResponse) {
     return true;
   }
   if (type === "EXPORT_LOGS") {
-    await readStore().then((store) => sendResponse({ ok: true, text: A.exportLogsText(store[KEYS.runLogs]) }));
+    await readStore().then((store) => sendResponse({ ok: true, text: A.exportLogsText(store[KEYS.runLogs]).split("\n").map(line => A.t(line)).join("\n") }));
     return true;
   }
   if (type === "EXPORT_SETTINGS") {

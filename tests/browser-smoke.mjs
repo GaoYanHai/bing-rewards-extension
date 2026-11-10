@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,8 @@ try {
   context = await chromium.launchPersistentContext(profile, {
     ...(process.env.EDGE_EXECUTABLE ? { executablePath: process.env.EDGE_EXECUTABLE } : { channel: "chromium" }),
     headless: true,
+    locale: "en-US",
+    viewport: { width: 1280, height: 800 },
     serviceWorkers: "block",
     // Unhandled requests must fail locally rather than reach any external website.
     proxy: { server: "http://127.0.0.1:9" },
@@ -60,6 +62,35 @@ try {
 
   const options = await context.newPage();
   await options.goto(`chrome-extension://${id}/options.html`);
+  await options.waitForFunction(() => document.documentElement.lang === "en");
+  assert.equal(await options.locator("h1").innerText(), "Bing Rewards Assistant");
+  await options.locator("#ui-language").selectOption("zh_CN");
+  await options.waitForFunction(() => document.documentElement.lang === "zh-CN");
+  assert.equal(await options.locator("h1").innerText(), "Bing 积分助手");
+  await popup.waitForFunction(() => document.documentElement.lang === "zh-CN");
+  await options.locator("#ui-language").selectOption("en");
+  await options.waitForFunction(() => document.documentElement.lang === "en");
+  await popup.waitForFunction(() => document.documentElement.lang === "en");
+  // Check hidden dialog copy, labels, help, statuses, and accessible attributes too.
+  async function untranslated(page, scope = "body") {
+    return page.locator(scope).evaluate(root => {
+      const result = [];
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        if (n.parentElement.closest("script, style, textarea, #today-words .chip, #blocked-words .chip, .keyword-link span")) continue;
+        if (/[\u3400-\u9fff]/.test(n.nodeValue)) result.push(n.nodeValue.trim());
+      }
+      for (const el of root.querySelectorAll("[title], [placeholder], [aria-label], [alt]")) {
+        for (const name of ["title", "placeholder", "aria-label", "alt"]) {
+          const value = el.getAttribute(name);
+          if (value && /[\u3400-\u9fff]/.test(value)) result.push(`${name}: ${value}`);
+        }
+      }
+      return result;
+    });
+  }
+  assert.deepEqual(await untranslated(options), [], "all English settings copy should be translated");
+  assert.deepEqual(await untranslated(popup), [], "all English popup copy should be translated");
   await options.locator("#search-limit").fill("1");
   await options.locator("#search-limit").blur();
   await options.locator("#simulate-typing").uncheck();
@@ -100,6 +131,8 @@ try {
   await searchPage.goto("https://www.bing.com/search?q=fixture");
   assert.equal(await searchPage.title(), "Search fixture");
   await searchPage.locator("#rebang-widget").waitFor({ state: "visible" });
+  assert.deepEqual(await untranslated(searchPage, "#rebang-widget"), [], "English search widget should be translated");
+  assert.equal(await searchPage.locator("#b_results").innerText(), "Offline test fixture", "localization must not change Bing content");
   await waitForStore(worker, s => s.Rebang_PointsBalance === 100);
   await popup.bringToFront();
   await popup.locator("#primary-btn").click();
@@ -113,8 +146,31 @@ try {
   assert.equal(final[countKey], 1, "first manual run must stop at configured count");
   assert.equal(final.Rebang_ManualContinue, false);
   assert.ok(searchRequests >= 2, "content script must navigate and count the result");
+  assert.deepEqual(await untranslated(options), [], "dynamic settings and logs should be English");
+  assert.deepEqual(await untranslated(popup), [], "dynamic popup should be English");
+  assert.deepEqual(await untranslated(searchPage, "#rebang-widget"), [], "completed widget should be English");
+  // Store assets are actual screenshots from an isolated fixture, with no personal data.
+  if (process.env.STORE_SCREENSHOTS) {
+    const out = path.join(root, "store", "screenshots", "en");
+    await mkdir(out, { recursive: true });
+    await options.locator("#search-limit").fill("30");
+    await options.locator("#search-limit").blur();
+    await waitForStore(worker, s => s.Rebang_LimitSearchCount === 30);
+    await options.bringToFront();
+    await options.goto(`chrome-extension://${id}/options.html`);
+    await options.waitForFunction(() => document.documentElement.lang === "en" && document.querySelector("#search-limit").value === "30");
+    await options.waitForFunction(() => window.scrollY === 0);
+    await options.screenshot({ path: path.join(out, "01-settings.png") });
+    await options.locator('.page-nav a[href="#keyword-settings"]').click();
+    await options.waitForFunction(() => {
+      const top = document.querySelector("#keyword-settings").getBoundingClientRect().top;
+      const offset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--nav-offset"));
+      return Math.abs(top - offset) < 2;
+    });
+    await options.screenshot({ path: path.join(out, "02-keywords.png") });
+  }
   assert.deepEqual(errors, [], "extension pages should not raise uncaught errors");
-  console.log("Browser smoke passed: onboarding, settings, schedule memory, danger confirmation, search navigation, pause/resume and completion.");
+  console.log("Browser smoke passed: English/Chinese switching, localized dynamic UI, onboarding, settings, schedule memory, danger confirmation, search navigation, pause/resume and completion.");
 } finally {
   await context?.close();
   await rm(profile, { recursive: true, force: true });

@@ -19,3 +19,4 @@ __pycache__/
 .pytest_cache/
 coverage/
 test-results/
+store/prepared-listings/

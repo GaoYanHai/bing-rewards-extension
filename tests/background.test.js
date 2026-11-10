@@ -4,12 +4,14 @@ import vm from "node:vm";
 
 const shared = readFileSync(new URL("../shared.js", import.meta.url), "utf8");
 const background = readFileSync(new URL("../background.js", import.meta.url), "utf8");
+const i18n = readFileSync(new URL("../i18n.js", import.meta.url), "utf8");
 
 function setup(patch = {}) {
   const store = {};
   const tabs = [];
   const listener = () => ({ addListener: vi.fn() });
   const chrome = {
+    i18n: { getUILanguage: () => "zh-CN" },
     storage: { local: {
       get: vi.fn(async () => ({ ...store })),
       set: vi.fn(async (values) => Object.assign(store, values))
@@ -27,6 +29,7 @@ function setup(patch = {}) {
     declarativeNetRequest: { updateSessionRules: vi.fn(async () => {}) }
   };
   const context = vm.createContext({ chrome, console: { warn: vi.fn() }, URL, URLSearchParams, setTimeout, clearTimeout, importScripts: () => {} });
+  vm.runInContext(i18n, context);
   vm.runInContext(shared, context);
   const A = context.BingAssistant;
   Object.assign(store, { [A.KEYS.riskAccepted]: true, [A.KEYS.loginState]: "in", [A.KEYS.limitSearchCount]: 3, [A.KEYS.notifyEnabled]: false }, patch);
@@ -36,6 +39,18 @@ function setup(patch = {}) {
 }
 
 describe("background workflows", () => {
+  it("uses the selected language for native notification titles, text, buttons and log exports", async () => {
+    const { store, A, call, chrome } = setup({ Rebang_UiLanguage: "en", Rebang_NotifyEnabled: true });
+    await call("notify", "test", "现在补做今天的任务吗？", { force: true, buttons: [{ title: "现在补做" }, { title: "今天算了" }] });
+    const options = chrome.notifications.create.mock.calls.at(-1)[1];
+    expect(options.title).toBe("Bing Rewards Assistant");
+    expect(JSON.stringify(options)).not.toMatch(/[\u3400-\u9fff]/);
+    store[A.KEYS.runLogs] = [{ time: "12:30", action: "已完成", result: "今天的电脑搜索已完成" }];
+    const respond = vi.fn();
+    await call("handleMessage", { type: "EXPORT_LOGS" }, {}, respond);
+    expect(respond.mock.calls.at(-1)[0].text).not.toMatch(/[\u3400-\u9fff]/);
+    expect(store[A.KEYS.runLogs][0].action).toBe("已完成");
+  });
   it("a first manual start respects the limit and pause/resume preserves progress", async () => {
     const { store, A, call } = setup();
     store[A.dailyCountKey()] = 1;

@@ -1,6 +1,7 @@
 "use strict";
 
 const A = BingAssistant;
+const uiLanguage = document.getElementById("ui-language");
 const scheduleEnabled = document.getElementById("schedule-enabled");
 const scheduleTime = document.getElementById("schedule-time");
 const nextRun = document.getElementById("next-run");
@@ -123,6 +124,7 @@ function renderMonthChart(model) {
 
 function fill(store) {
   const model = A.buildViewModel(store);
+  setIfIdle(uiLanguage, ["en", "zh_CN"].includes(store[A.KEYS.uiLanguage]) ? store[A.KEYS.uiLanguage] : "auto");
   setIfIdle(scheduleEnabled, model.schedule.enabled, true);
   setIfIdle(
     scheduleTime,
@@ -235,6 +237,8 @@ async function saveSchedulePatch(enabled, parsed) {
   }
   return save(patch);
 }
+
+uiLanguage.addEventListener("change", () => save({ [A.KEYS.uiLanguage]: uiLanguage.value }));
 
 scheduleEnabled.addEventListener("change", async () => {
   await saveSchedulePatch(scheduleEnabled.checked, readScheduleInput());
@@ -438,7 +442,7 @@ document.getElementById("import-settings-file").addEventListener("change", async
   const file = input.files && input.files[0];
   input.value = "";
   if (!file) return;
-  if (!window.confirm("导入会覆盖当前设置和词库，积分和运行状态不会改。确定导入吗？")) {
+  if (!window.confirm(A.t("导入会覆盖当前设置和词库，积分和运行状态不会改。确定导入吗？"))) {
     setBackupStatus("已取消导入，当前设置保持不变。");
     return;
   }

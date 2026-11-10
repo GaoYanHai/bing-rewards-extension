@@ -7,6 +7,8 @@ export default [
       globals: {
         chrome: "readonly",
         document: "readonly",
+        NodeFilter: "readonly",
+        queueMicrotask: "readonly",
         window: "readonly",
         console: "readonly",
         localStorage: "readonly",

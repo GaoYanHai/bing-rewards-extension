@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extName__",
-  "version": "3.4.3",
+  "version": "3.4.4",
   "default_locale": "zh_CN",
   "homepage_url": "https://github.com/GaoYanHai/bing-rewards-extension",
   "description": "__MSG_extDescription__",
@@ -42,6 +42,7 @@
         "https://rewards.bing.com/*"
       ],
       "js": [
+        "i18n.js",
         "shared.js",
         "content.js"
       ],
