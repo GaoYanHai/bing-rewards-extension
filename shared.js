@@ -28,7 +28,7 @@
   const DEFAULT_INTERVAL_MAX = 14;
   const BUSY_IDLE_MS = 60000;
   const IGNORE_BUSY_AFTER_SEARCH_MS = 20000;
-  const PRODUCT_VERSION = "3.4.2";
+  const PRODUCT_VERSION = "3.4.3";
   const QUIET_STUCK_AFTER_MS = 45000;
   const QUIET_HEARTBEAT_STALE_MS = 20000;
   const QUIET_RELOAD_AFTER_MS = 60000;
@@ -659,6 +659,7 @@
 
   function shouldRemindMissed(store, now = new Date()) {
     if (!store || store[KEYS.missedRemindEnabled] === false) return false;
+    if (isLockOn(store) || isCompleteToday(store, now)) return false;
     if (!yesterdayMissed(store, now)) return false;
     const today = localDateString(now);
     if (store[KEYS.missedReminded] === today) return false;
@@ -828,11 +829,11 @@
   function whatsNewCopy() {
     return {
       version: PRODUCT_VERSION,
-      title: "3.4.2 后台等待时不再误刷新",
+      title: "3.4.3 搜索控制与定时修复",
       points: [
-        "搜索间隔等待时不再当成卡住，也不会反复刷新搜索页",
-        "今天完成后不会再自动开始，但手动点开始仍会继续搜",
-        "刷新后重新计分，空转不计入连续没有加分",
+        "首次手动开始会遵守搜索目标，完成后可手动再搜",
+        "输入中暂停或操作页面会取消本次搜索",
+        "补做开关和补做前询问对搜索页同样生效",
         "默认仍是安全模式，只做电脑搜索；权限和产品名不变"
       ]
     };
@@ -880,8 +881,9 @@
   }
 
   function readablePoints(value) {
+    if (value == null || typeof value === "boolean" || String(value).trim() === "") return null;
     const points = Number(value);
-    return Number.isFinite(points) ? points : null;
+    return Number.isFinite(points) && points >= 0 ? points : null;
   }
 
   function pointsGainedFrom(store) {
@@ -1207,13 +1209,13 @@
     const limit = extra.limit || DEFAULT_NO_GAIN_LIMIT;
     if (kind === "mobile") {
       return {
-        short: "移动搜索已满",
-        message: `连续 ${limit} 次移动搜索没有加分，今天的移动搜索已经满了。`
+        short: "移动搜索连续未加分",
+        message: `连续 ${limit} 次移动搜索没有加分，已按设置结束；是否已满请以 Rewards 页面为准。`
       };
     }
     return {
-      short: "电脑搜索已满",
-      message: `连续 ${limit} 次搜索没有加分，今天的电脑搜索已经满了。`
+      short: "电脑搜索连续未加分",
+      message: `连续 ${limit} 次搜索没有加分，已按设置结束；是否已满请以 Rewards 页面为准。`
     };
   }
 
@@ -2110,7 +2112,7 @@
     const dailyDone = store[dailyTasksDoneKey(now)] === true || store[dailyTasksDoneKey(now)] === "true";
     const loginState = store[KEYS.loginState] || "unknown";
     const running = isLockOn(store);
-    const productState = store[KEYS.productState] || "";
+    let productState = store[KEYS.productState] || "";
     const riskAccepted = store[KEYS.riskAccepted] === true;
     const notifyEnabled = store[KEYS.notifyEnabled] !== false;
     const schedule = parseHourMinute(store[KEYS.autoStartHour], store[KEYS.autoStartMin]);
@@ -2129,9 +2131,13 @@
       message: lastError
     });
     const points = store[KEYS.pointsBalance];
-    const summary = store[KEYS.lastRunSummary] && typeof store[KEYS.lastRunSummary] === "object"
-      ? store[KEYS.lastRunSummary]
-      : null;
+    const rawSummary = store[KEYS.lastRunSummary];
+    const summary = rawSummary && (rawSummary.date === localDateString(now)
+      || (!rawSummary.date && rawSummary.at && localDateString(new Date(rawSummary.at)) === localDateString(now)))
+      ? rawSummary : null;
+    if (rawSummary && !summary && !running) productState = "ready";
+    const sessionIsToday = startedAt > 0 && localDateString(new Date(startedAt)) === localDateString(now);
+    const currentGain = rawSummary && !summary && !running && !sessionIsToday ? null : pointsGainedFrom(store);
     const taskList = readTaskList(store, now);
     const dailySummary = summarizeTasks(taskList.cards);
     const waitingTask = store[KEYS.waitingUserTask] && typeof store[KEYS.waitingUserTask] === "object"
@@ -2205,7 +2211,7 @@
       intervalMax: interval.max,
       simulateTyping: store[KEYS.simulateTyping] === true,
       pauseWhenBusy: store[KEYS.pauseWhenBusy] !== false,
-      pointsGained: summary && summary.pointsGained != null ? summary.pointsGained : pointsGainedFrom(store),
+      pointsGained: !running && summary && summary.pointsGained != null ? summary.pointsGained : currentGain,
       closingLine: summary && summary.closingLine ? summary.closingLine : formatClosingLine({
         dailyEnabled,
         dailyDone,
@@ -2218,7 +2224,7 @@
       failShort: fail.short,
       failNext: fail.next,
       failMessage: lastError || fail.message,
-      points: Number.isFinite(Number(points)) ? Number(points) : null,
+      points: readablePoints(points),
       startedAt,
       elapsedMs,
       summary,
@@ -2252,7 +2258,7 @@
         dailyEnabled,
         dailyDone,
         mobilePending,
-        pointsGained: summary && summary.pointsGained != null ? summary.pointsGained : pointsGainedFrom(store),
+        pointsGained: !running && summary && summary.pointsGained != null ? summary.pointsGained : currentGain,
         failReasonCode,
         failShort: fail.short,
         failMessage: lastError || fail.message

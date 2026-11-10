@@ -13,7 +13,12 @@ function withRunGate(fn) {
 }
 
 async function readStore() {
-  return A.Storage.getAll();
+  return chrome.storage.local.get(null);
+}
+
+async function saveStore(patch) {
+  if (!await A.Storage.set(patch)) throw new Error("无法保存扩展状态");
+  return true;
 }
 
 async function readSchedule() {
@@ -195,7 +200,7 @@ async function nudgeQuietTabIfStuck() {
       action = "搜索页没有反应，已新开一页";
       result = unusable ? "原页面已崩溃" : "没找到可用搜索页";
     }
-    await A.Storage.set({
+    await saveStore({
       [KEYS.noGainHold]: true,
       [KEYS.searchSubmitted]: "",
       [KEYS.runLogs]: withLog(store, { action, result })
@@ -207,7 +212,7 @@ async function nudgeQuietTabIfStuck() {
   if (!tabId) {
     lastQuietReviveAt = now;
     tabId = await openFreshWorkingTab(store);
-    await A.Storage.set({
+    await saveStore({
       [KEYS.noGainHold]: true,
       [KEYS.searchSubmitted]: "",
       [KEYS.runLogs]: withLog(store, { action: "搜索页没有反应，已新开一页", result: "没找到可用搜索页" })
@@ -312,7 +317,7 @@ async function clearMobileSearchSession(extra = {}) {
     [KEYS.mobileSearchTabId]: 0,
     [KEYS.searchPhase]: extra.phase || ""
   };
-  await A.Storage.set(patch);
+  await saveStore(patch);
   return tabId;
 }
 
@@ -323,7 +328,7 @@ async function failToday(code, extra = {}) {
   const copy = A.failCopy(code, extra);
   const message = extra.message || copy.message;
   const model = A.buildViewModel(store);
-  await A.Storage.set({
+  await saveStore({
     [KEYS.lastRunSummary]: A.buildTodaySummary(store, {
       reason: "failed",
       reasonCode: code,
@@ -401,7 +406,7 @@ async function startMobileSearch(options = {}) {
     }
     return failToday(A.FAIL_CODES.MOBILE_HEADER);
   }
-  await A.Storage.set({
+  await saveStore({
     [KEYS.searchPhase]: "mobile",
     [KEYS.mobileSearchTabId]: tabId,
     [KEYS.globalMasterTabId]: "",
@@ -426,7 +431,7 @@ async function advanceAfterMobile(message) {
   const model = A.buildViewModel(next);
   const keepGoing = A.isLockOn(next) || next[KEYS.paused] === true || next[KEYS.productState] === "paused" || next[KEYS.productState] === "running";
   if (keepGoing && model.dailyEnabled && !model.dailyDone) {
-    await A.Storage.set({
+    await saveStore({
       [KEYS.searchPhase]: "daily",
       [KEYS.autoSearchLock]: "on",
       [KEYS.productState]: "running",
@@ -438,7 +443,7 @@ async function advanceAfterMobile(message) {
     await updateBadge();
     return { ok: true, next: "daily" };
   }
-  await A.Storage.set({ [KEYS.searchPhase]: "" });
+  await saveStore({ [KEYS.searchPhase]: "" });
   if (keepGoing) {
     await completeTodayFromBackground(next, message || "移动搜索已完成");
     return { ok: true, next: "complete" };
@@ -450,7 +455,7 @@ async function advanceAfterMobile(message) {
 async function finishMobileSearch() {
   const store = await readStore();
   const today = A.localDateString();
-  await A.Storage.set({
+  await saveStore({
     [KEYS.mobileDoneDate]: today,
     [KEYS.runLogs]: withLog(store, { action: "移动搜索已完成" })
   });
@@ -478,7 +483,7 @@ async function handleMobileTabRemoved(tabId) {
     patch[KEYS.productState] = "paused";
     patch[KEYS.runLogs] = withLog(store, { action: "移动搜索页被关掉了", result: "点继续会重新打开" });
   }
-  await A.Storage.set(patch);
+  await saveStore(patch);
   await updateBadge();
 }
 
@@ -520,7 +525,7 @@ async function completeTodayFromBackground(store, message) {
     durationMs,
     at: Date.now()
   });
-  await A.Storage.set({
+  await saveStore({
     [KEYS.lastRunSummary]: summary,
     [KEYS.lastStatusMessage]: message || "今天的任务已完成",
     [KEYS.autoSearchLock]: "off",
@@ -586,7 +591,7 @@ function dayRecordPatch(store, extra = {}) {
 
 async function markPromptedToday(now = new Date()) {
   const today = A.localDateString(now);
-  await A.Storage.set({
+  await saveStore({
     [KEYS.catchUpPrompted]: today,
     [KEYS.missedReminded]: today
   });
@@ -594,7 +599,7 @@ async function markPromptedToday(now = new Date()) {
 
 async function dismissToday(now = new Date()) {
   const today = A.localDateString(now);
-  await A.Storage.set({
+  await saveStore({
     [KEYS.catchUpPrompted]: today,
     [KEYS.catchUpDismissed]: today,
     [KEYS.missedReminded]: today
@@ -606,7 +611,7 @@ async function startFromPrompt(reason = "catchup") {
   await markPromptedToday(now);
   const result = await startToday(reason, { foreground: true });
   if (result.ok) {
-    await A.Storage.set({ [A.triggeredKey(now)]: "true" });
+    await saveStore({ [A.triggeredKey(now)]: "true" });
   } else if (result && result.error) {
     void notify("bing-assistant-start", result.error, { force: true });
   }
@@ -692,7 +697,7 @@ async function applyDefaultsIfNeeded() {
   } else if (!store[KEYS.selectedChannel]) {
     patch[KEYS.selectedChannel] = A.WORD_PACK_SHORT;
   }
-  if (Object.keys(patch).length) await A.Storage.set(patch);
+  if (Object.keys(patch).length) await saveStore(patch);
 }
 
 function syncGoalPatch(goal) {
@@ -732,7 +737,7 @@ async function startTodayUnlocked(reason = "manual", options = {}) {
   const quotaDone = model.count >= model.limit && !model.mobilePending && (!model.dailyEnabled || model.dailyDone);
   const alreadyDone = quotaDone || A.isCompleteToday(store);
   if (A.isAutoStartReason(reason) && alreadyDone) {
-    await A.Storage.set({ [KEYS.productState]: "complete" });
+    await saveStore({ [KEYS.productState]: "complete" });
     await updateBadge();
     return { ok: false, error: "今天的任务已经完成" };
   }
@@ -743,7 +748,7 @@ async function startTodayUnlocked(reason = "manual", options = {}) {
       ? "正在补做今天的任务"
       : (reason === "missed" ? "昨天还没做完，正在开始今天的任务" : "开始今日任务"));
   const startPoints = A.readablePoints(store[KEYS.pointsBalance]);
-  await A.Storage.set({
+  await saveStore({
     [KEYS.autoSearchLock]: "on",
     [KEYS.globalMasterTabId]: "",
     [KEYS.globalMasterStatus]: "IDLE",
@@ -772,7 +777,7 @@ async function startTodayUnlocked(reason = "manual", options = {}) {
     [KEYS.runLogs]: withLog(store, { action }),
     ...clearRunFlags(),
     [KEYS.ignoreBusyUntil]: Date.now() + 20000,
-    [KEYS.manualContinue]: reason === "manual"
+    [KEYS.manualContinue]: reason === "manual" && alreadyDone
   });
 
   if (model.count >= model.limit && model.mobilePending) {
@@ -781,10 +786,15 @@ async function startTodayUnlocked(reason = "manual", options = {}) {
     await updateBadge();
     return started;
   }
-  if (reason !== "manual" && model.count >= model.limit && model.dailyEnabled && !model.dailyDone) {
-    await openOrWakeRewardsTab({ foreground });
-  } else {
-    await openOrWakeSearchTab({ foreground });
+  try {
+    if (reason !== "manual" && model.count >= model.limit && model.dailyEnabled && !model.dailyDone) {
+      await openOrWakeRewardsTab({ foreground });
+    } else {
+      await openOrWakeSearchTab({ foreground });
+    }
+  } catch (error) {
+    A.warn("startToday", error);
+    return failToday(A.FAIL_CODES.NETWORK, { message: "无法打开任务页面，请检查浏览器后重试。" });
   }
   if (!foreground) await scheduleQuietWatchdog();
   await updateBadge();
@@ -800,7 +810,7 @@ async function stopTodayUnlocked(message = "已停止") {
   await clearMobileSearchSession({ phase: "" });
   const store = await readStore();
   const model = A.buildViewModel(store);
-  await A.Storage.set({
+  await saveStore({
     [KEYS.autoSearchLock]: "off",
     [KEYS.productState]: "ready",
     [KEYS.waitingUserTask]: null,
@@ -842,7 +852,7 @@ async function pauseTodayUnlocked(reason = A.PAUSE_REASONS.USER, message) {
   if (pauseReason === A.PAUSE_REASONS.USER || pauseReason === A.PAUSE_REASONS.MOBILE_TAB) {
     patch[KEYS.runLogs] = withLog(store, { action: pauseReason === A.PAUSE_REASONS.MOBILE_TAB ? "移动搜索页被关掉了" : "已暂停", result: status });
   }
-  await A.Storage.set(patch);
+  await saveStore(patch);
   await updateBadge();
   return { ok: true };
 }
@@ -858,7 +868,7 @@ async function resumeTodayUnlocked(options = {}) {
   }
   const ignoreBusyMs = options.ignoreBusyMs != null ? Number(options.ignoreBusyMs) : 20000;
   const ignoreUntil = Date.now() + (options.silent ? Math.max(0, ignoreBusyMs) : Math.max(20000, ignoreBusyMs));
-  await A.Storage.set({
+  await saveStore({
     [KEYS.paused]: false,
     [KEYS.pauseReason]: "",
     [KEYS.productState]: "running",
@@ -895,7 +905,7 @@ async function skipWaitingTask() {
       ? { ...card, status: A.TASK_STATUS.SKIPPED, reason: "你跳过了这张", updatedAt: Date.now() }
       : card
   ));
-  await A.Storage.set({
+  await saveStore({
     [KEYS.taskList]: { date: taskList.date, cards },
     [KEYS.waitingUserTask]: null,
     [KEYS.userTaskAction]: "",
@@ -914,7 +924,7 @@ async function confirmWaitingTask() {
   const store = await readStore();
   const waiting = store[KEYS.waitingUserTask];
   if (!waiting || !waiting.url) return { ok: false, error: "现在没有需要你点的活动" };
-  await A.Storage.set({
+  await saveStore({
     [KEYS.userTaskAction]: "done",
     [KEYS.userTaskConfirmTries]: 0,
     [KEYS.lastStatusMessage]: `正在确认「${waiting.name || "这张活动"}」是否完成`
@@ -931,16 +941,16 @@ async function startDailyRun(reason = "alarm") {
   if (reason === "catchup" && store[KEYS.catchUpDismissed] === A.localDateString(now)) return;
   if (A.shouldSkipAutoStart(store, now)) return;
   const model = A.buildViewModel(store, now);
-  if (model.count >= model.limit && (!model.dailyEnabled || model.dailyDone)) return;
+  if (model.count >= model.limit && !model.mobilePending && (!model.dailyEnabled || model.dailyDone)) return;
   if (store[KEYS.loginState] === "out" && !A.hadLoginHistory(store)) {
-    await openOrWakeSearchTab({ foreground: true });
+    await openOrWakeSearchTab({ foreground: false });
     await notify("bing-assistant-login", "还没有登录微软账号，今天的任务还没开始。");
     return;
   }
 
   const result = await startToday(reason);
   if (result.ok) {
-    await A.Storage.set({ [A.triggeredKey(now)]: "true" });
+    await saveStore({ [A.triggeredKey(now)]: "true" });
   }
 }
 
@@ -954,6 +964,7 @@ async function catchUpIfNeeded() {
   if (now.getTime() < scheduledToday.getTime()) return;
   const store = await readStore();
   if (store[KEYS.catchUpEnabled] === false) return;
+  if (A.shouldSkipAutoStart(store, now) || A.isCompleteToday(store, now)) return;
   const today = A.localDateString(now);
   if (store[KEYS.catchUpDismissed] === today) return;
   if (store[KEYS.catchUpAsk] === true && store[KEYS.notifyEnabled] !== false) {
@@ -966,6 +977,11 @@ async function catchUpIfNeeded() {
 }
 
 async function maybeRemindMissed() {
+  const store = await readStore();
+  if (store[KEYS.riskAccepted] !== true || store[KEYS.notifyEnabled] === false) return false;
+  if (!A.shouldRemindMissed(store)) return false;
+  await saveStore({ [KEYS.missedReminded]: A.localDateString() });
+  await notify("bing-assistant-missed-info", "昨天的计划还没完成。昨天的积分无法补记，今天可按原计划继续。");
   return false;
 }
 
@@ -1038,76 +1054,81 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   void updateBadge();
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+async function handleMessage(message, _sender, sendResponse) {
   const type = message && message.type;
+  if (type === "CHECK_AUTO_START") {
+    await catchUpIfNeeded();
+    sendResponse({ ok: true });
+    return true;
+  }
   if (type === "SEARCH_WAKE") {
-    scheduleSearchWake(message.at).then(() => sendResponse({ ok: true }));
+    await scheduleSearchWake(message.at).then(() => sendResponse({ ok: true }));
     return true;
   }
   if (type === "ACCEPT_RISK") {
-    A.Storage.set({ [KEYS.riskAccepted]: true }).then(() => sendResponse({ ok: true }));
+    await saveStore({ [KEYS.riskAccepted]: true }).then(() => sendResponse({ ok: true }));
     return true;
   }
   if (type === "OPEN_BING") {
-    openOrWakeSearchTab().then(() => sendResponse({ ok: true }));
+    await openOrWakeSearchTab().then(() => sendResponse({ ok: true }));
     return true;
   }
   if (type === "OPEN_REWARDS") {
-    openOrWakeRewardsTab().then(() => sendResponse({ ok: true }));
+    await openOrWakeRewardsTab().then(() => sendResponse({ ok: true }));
     return true;
   }
   if (type === "START_TODAY") {
-    startToday("manual").then(sendResponse);
+    await startToday("manual").then(sendResponse);
     return true;
   }
   if (type === "STOP_TODAY") {
-    stopToday("已停止").then(sendResponse);
+    await stopToday("已停止").then(sendResponse);
     return true;
   }
   if (type === "PAUSE_TODAY") {
-    pauseToday(message.reason || A.PAUSE_REASONS.USER, message.message).then(sendResponse);
+    await pauseToday(message.reason || A.PAUSE_REASONS.USER, message.message).then(sendResponse);
     return true;
   }
   if (type === "RESUME_TODAY") {
-    resumeToday({ silent: message.silent === true, ignoreBusyMs: message.ignoreBusyMs }).then(sendResponse);
+    await resumeToday({ silent: message.silent === true, ignoreBusyMs: message.ignoreBusyMs }).then(sendResponse);
     return true;
   }
   if (type === "USER_TASK_SKIP") {
-    skipWaitingTask().then(sendResponse);
+    await skipWaitingTask().then(sendResponse);
     return true;
   }
   if (type === "USER_TASK_DONE") {
-    confirmWaitingTask().then(sendResponse);
+    await confirmWaitingTask().then(sendResponse);
     return true;
   }
   if (type === "START_MOBILE_SEARCH") {
-    startMobileSearch().then(sendResponse);
+    await startMobileSearch().then(sendResponse);
     return true;
   }
   if (type === "MOBILE_SEARCH_FINISHED") {
-    finishMobileSearch().then(sendResponse);
+    await finishMobileSearch().then(sendResponse);
     return true;
   }
   if (type === "SET_TODAY_GOAL") {
-    A.Storage.set(syncGoalPatch(message.goal)).then(() => sendResponse({ ok: true }));
+    await saveStore(syncGoalPatch(message.goal)).then(() => sendResponse({ ok: true }));
     return true;
   }
   if (type === "DISMISS_WHATS_NEW") {
-    A.Storage.set({ [KEYS.whatsNewSeen]: A.PRODUCT_VERSION }).then(() => sendResponse({ ok: true }));
+    await saveStore({ [KEYS.whatsNewSeen]: A.PRODUCT_VERSION }).then(() => sendResponse({ ok: true }));
     return true;
   }
   if (type === "SHOW_WHATS_NEW") {
-    A.Storage.set({ [KEYS.whatsNewSeen]: "" }).then(() => sendResponse({ ok: true }));
+    await saveStore({ [KEYS.whatsNewSeen]: "" }).then(() => sendResponse({ ok: true }));
     return true;
   }
   if (type === "REFRESH_KEYWORDS") {
-    readStore().then((store) => {
+    await readStore().then((store) => {
       const nextStore = {
         ...store,
         [KEYS.keywordShuffle]: A.readNumber(store, KEYS.keywordShuffle, 0) + 1
       };
       const plan = refreshKeywordPlan(nextStore);
-      return A.Storage.set({
+      return saveStore({
         [KEYS.keywordShuffle]: nextStore[KEYS.keywordShuffle],
         [KEYS.dailyKeywordPlan]: {
           date: plan.date,
@@ -1121,12 +1142,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (type === "BLOCK_KEYWORD") {
     const word = String(message.word || "").trim();
-    readStore().then((store) => {
+    await readStore().then((store) => {
       const blocked = A.normalizeStringList(store[KEYS.blockedKeywords]);
       if (word && !blocked.includes(word)) blocked.push(word);
       const nextStore = { ...store, [KEYS.blockedKeywords]: blocked };
       const plan = refreshKeywordPlan(nextStore);
-      return A.Storage.set({
+      return saveStore({
         [KEYS.blockedKeywords]: blocked,
         [KEYS.dailyKeywordPlan]: {
           date: plan.date,
@@ -1140,11 +1161,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (type === "EXPORT_LOGS") {
-    readStore().then((store) => sendResponse({ ok: true, text: A.exportLogsText(store[KEYS.runLogs]) }));
+    await readStore().then((store) => sendResponse({ ok: true, text: A.exportLogsText(store[KEYS.runLogs]) }));
     return true;
   }
   if (type === "EXPORT_SETTINGS") {
-    readStore().then((store) => sendResponse({ ok: true, data: A.exportSettings(store) }));
+    await readStore().then((store) => sendResponse({ ok: true, data: A.exportSettings(store) }));
     return true;
   }
   if (type === "IMPORT_SETTINGS") {
@@ -1153,7 +1174,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: parsed.error || "导入失败，当前设置没有改动。" });
       return true;
     }
-    readStore().then((store) => {
+    await readStore().then((store) => {
       const nextStore = { ...store, ...parsed.patch };
       const extra = {};
       if (Object.prototype.hasOwnProperty.call(parsed.patch, KEYS.selectedChannel) ||
@@ -1168,7 +1189,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           note: plan.note
         };
       }
-      return A.Storage.set({ ...parsed.patch, ...extra });
+      return saveStore({ ...parsed.patch, ...extra });
     }).then(() => sendResponse({ ok: true })).catch(() => {
       sendResponse({ ok: false, error: "导入失败，当前设置没有改动。" });
     });
@@ -1181,7 +1202,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const limit = Number(message.limit || A.DEFAULT_SEARCH_LIMIT);
     const startedAt = Number(message.startedAt || 0);
     const durationMs = startedAt > 0 ? Date.now() - startedAt : 0;
-    readStore().then(async (store) => {
+    await readStore().then(async (store) => {
       await clearQuietWatchdog();
       if (reason === "complete" && A.shouldRunMobileSearch(store)) {
         const started = await startMobileSearch({ foreground: false });
@@ -1238,11 +1259,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       } else {
         patch[KEYS.productState] = "ready";
       }
-      return A.Storage.set(patch).then(updateBadge);
+      return saveStore(patch).then(updateBadge);
     }).then(() => sendResponse({ ok: true }));
     return true;
   }
+  sendResponse({ ok: false, error: "未知操作" });
   return false;
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Keep the channel open and return failures to the UI instead of leaving buttons waiting.
+  const respond = (result) => sendResponse(result);
+  void handleMessage(message, sender, respond).catch((error) => {
+    A.warn("handleMessage", error);
+    respond({ ok: false, error: "操作失败，请重试；详情可在扩展后台查看。" });
+  });
+  return true;
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {

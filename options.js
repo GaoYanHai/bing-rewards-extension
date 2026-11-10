@@ -39,8 +39,15 @@ const intervalMax = document.getElementById("interval-max");
 const simulateTyping = document.getElementById("simulate-typing");
 const pauseWhenBusy = document.getElementById("pause-when-busy");
 
-function send(type, extra = {}) {
-  return A.sendMessage(type, extra);
+function showSettingsError(message) {
+  const status = document.getElementById("settings-status");
+  if (status) status.textContent = message || "";
+}
+
+async function send(type, extra = {}) {
+  const result = await A.sendMessage(type, extra);
+  showSettingsError(result?.ok === false ? (result.error || "操作失败，请重试。") : "");
+  return result;
 }
 
 function renderChips(container, items, emptyText, onRemove) {
@@ -101,7 +108,7 @@ function renderMonthChart(model) {
     }).join("");
   }
   if (bars) {
-    const hasGain = chart.hasTodayGain === true || (chart.bars || []).some((item) => item.date === A.localDateString() && Number(item.value) > 0);
+    const hasGain = (chart.bars || []).some((item) => Number(item.value) > 0);
     bars.hidden = !hasGain;
     if (hasGain) {
       bars.innerHTML = chart.bars.map((item) => {
@@ -186,7 +193,9 @@ function fill(store) {
 }
 
 async function save(partial) {
-  await A.Storage.set(partial);
+  const ok = await A.Storage.set(partial);
+  showSettingsError(ok ? "" : "保存失败，请重试。当前修改尚未保存。");
+  return ok;
 }
 
 function readScheduleInput() {

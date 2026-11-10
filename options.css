@@ -33,6 +33,8 @@
   }
 }
 * { box-sizing: border-box; }
+#settings-status { color: var(--danger); }
+#settings-status:empty { display: none; }
 html { scroll-behavior: auto; scroll-padding-top: 0; }
 body {
   margin: 0;

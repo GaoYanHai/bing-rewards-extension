@@ -16,6 +16,7 @@
       </div>
     </header>
 
+    <p id="settings-status" role="status" aria-live="polite"></p>
     <nav class="page-nav" aria-label="设置快速导航">
       <a href="#basic-settings">基础</a>
       <a href="#history-settings">记录</a>
@@ -178,7 +179,7 @@
         <span>连续没有积分时视为已满</span>
         <input type="number" id="no-gain-limit" min="3" max="30" step="1">
       </label>
-      <p class="help">连续几次搜索都没有加分，就证明今天的搜索已经满了。刷新页面或暂时读不到登录时不计入。</p>
+      <p class="help">连续几次搜索都没有加分，会按搜索已满结束本次任务；这是本机推断，不代表微软已确认配额已满。刷新页面或暂时读不到登录时不计入。</p>
       <label class="row">
         <span>每日活动重试次数</span>
         <input type="number" id="daily-retries" min="1" max="10" step="1">
@@ -237,7 +238,7 @@
 
     <section id="about-settings">
       <h2>这个版本</h2>
-      <p id="whats-new-title">3.4.2 后台等待时不再误刷新</p>
+      <p id="whats-new-title">3.4.3 搜索控制与定时修复</p>
       <ul id="whats-new-points">
         <li>搜索间隔等待时不再当成卡住，也不会反复刷新搜索页</li>
         <li>今天完成后不会再自动开始，但手动点开始仍会继续搜</li>

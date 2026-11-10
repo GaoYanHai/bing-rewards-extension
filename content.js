@@ -67,7 +67,6 @@ function GM_addStyle(cssText) {
 }
 
 // 跨天检测用：从持久存储读取上次检查日期，首次运行时初始化为今天
-const SCRIPT_LOAD_DATE = GM_getValue("Rebang_LastCheckDate", getLocalDateStr());
 let currentKeywordLabel = "-";
 
 // ==========================================
@@ -538,15 +537,11 @@ window.addEventListener("blur", () => {
 // 常量定义
 const prefix = "Rebang_";
 const autoSearchLockKey = `${prefix}AutoSearchLock`; // 搜索开关锁
-const enableDailyTasksKey = `${prefix}EnableDailyTasks`; // 是否启用每日任务
 const maxNoGainLimitKey = `${prefix}MaxNoGainLimit`; // 连续没有加分时停止的次数
 const dailyTaskMaxRetriesKey = `${prefix}DailyTaskMaxRetries`; // 任务重试次数
 const autoSearchLockExpiresKey = `${prefix}AutoSearchLockExpires`; // 搜索冷却时间
 const consecutiveNoGainKey = `${prefix}ConsecutiveNoGainCount`; // 连续无积分计数
 const lastPointsKey = `${prefix}LastPoints`; // 上次记录的积分
-const autoStartHourKey = `${prefix}AutoStartHour`; // 自动开始小时
-const autoStartMinKey = `${prefix}AutoStartMin`; // 自动开始分钟
-const limitSearchCountKey = `${prefix}LimitSearchCount`; // 每日搜索限制
 
 // ==========================================
 // 多标签页互斥与协同逻辑常量
@@ -629,7 +624,6 @@ const rewardsClickTimeKey = `${prefix}RewardsClickTime`; // 任务点击时间�
 
 const selectedChannelKey = `${prefix}SelectedChannel`; // 当前选中的词库
 const currentKeywordIndexKey = `${prefix}CurrentKeywordIndex`; // 当前搜索到第几个词
-const channelListKey = `${prefix}Channels`; // 词库列表缓存
 const widgetPosKey = `${prefix}WidgetPosition`; // 悬浮窗位置
 const widgetStateKey = `${prefix}WidgetState`; // 悬浮窗折叠状态
 // 今日词库走 shared.js 的 buildKeywordPlan
@@ -665,9 +659,6 @@ function getAutoSearchCountKey() {
   return `${prefix}AutoSearchCount_${getLocalDateStr()}`;
 }
 
-function getAutoStartTriggeredKey() {
-  return `${prefix}AutoStartTriggered_${getLocalDateStr()}`;
-}
 
 function getDailyTasksDoneKey() {
   return `${prefix}DailyTasksDone_${getLocalDateStr()}`;
@@ -1025,9 +1016,6 @@ function pushRunLog(event) {
   renderRecentLogs();
 }
 
-function pushRecentLog(msg) {
-  pushRunLog({ action: String(msg || "") });
-}
 
 function renderRecentLogs() {
   const box = $("#ext-recent-logs");
@@ -1104,7 +1092,27 @@ function nativeSetValue(el, value) {
     else el.value = value;
 }
 
-function doSearch(keyword) {
+async function submitSearch(keyword, navigate) {
+    if (abortSearchForUser || getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) return false;
+    // Persist before navigation: the document can be destroyed as soon as click() runs.
+    const patch = {
+        [BingAssistant.KEYS.searchSubmitted]: keyword,
+        [BingAssistant.KEYS.ignoreBusyUntil]: Date.now() + BingAssistant.IGNORE_BUSY_AFTER_SEARCH_MS
+    };
+    if (!await BingAssistant.Storage.set(patch)) {
+        showUserMessage("无法保存搜索进度，已取消这次搜索。请检查扩展存储后重试。");
+        return false;
+    }
+    Object.assign(rebangExtensionStore, patch);
+    if (abortSearchForUser || getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) {
+        await setVal(BingAssistant.KEYS.searchSubmitted, "");
+        return false;
+    }
+    navigate();
+    return true;
+}
+
+async function doSearch(keyword) {
     const box = findSearchBox();
     if (box.$input.length > 0 && box.$btn.length > 0) {
         box.$input.val(keyword);
@@ -1112,8 +1120,7 @@ function doSearch(keyword) {
             nativeSetValue(box.$input[0], keyword);
             box.$input[0].dispatchEvent(new Event("input", { bubbles: true }));
         } catch (e) { BingAssistant.warn("nativeSetValue", e); }
-        box.$btn[0].click();
-        return true;
+        return submitSearch(keyword, () => box.$btn[0].click());
     }
     pushRunLog({
         action: "找不到搜索框",
@@ -1121,8 +1128,9 @@ function doSearch(keyword) {
         reason: "页面改版",
         reasonCode: BingAssistant.FAIL_CODES.PAGE_CHANGED
     });
-    window.location.href = BingAssistant.buildSearchUrl(keyword, { mobile: isMobileSearchMode() });
-    return false;
+    return submitSearch(keyword, () => {
+        window.location.href = BingAssistant.buildSearchUrl(keyword, { mobile: isMobileSearchMode() });
+    });
 }
 
 async function typeKeywordLikeHuman(keyword) {
@@ -1150,9 +1158,8 @@ async function typeKeywordLikeHuman(keyword) {
             return false;
         }
         if (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused()) return false;
-        box.$btn[0].click();
-        return true;
-    } catch (error) {
+        return await submitSearch(keyword, () => box.$btn[0].click());
+    } catch (_error) {
         return false;
     } finally {
         simulatingTyping = false;
@@ -1168,9 +1175,9 @@ async function performSearch(keyword) {
     let ok = false;
     if (simulate) {
         ok = await typeKeywordLikeHuman(keyword);
-        if (!ok && (getVal(autoSearchLockKey, "off") !== "on" || isRunPaused())) return false;
+        if (!ok && (abortSearchForUser || isUserBusyNow() || getVal(autoSearchLockKey, "off") !== "on" || isRunPaused())) return false;
     }
-    if (!ok) ok = doSearch(keyword);
+    if (!ok) ok = await doSearch(keyword);
     if (ok) {
         await setVal(BingAssistant.KEYS.ignoreBusyUntil, Date.now() + BingAssistant.IGNORE_BUSY_AFTER_SEARCH_MS);
     }
@@ -1806,7 +1813,7 @@ async function handleRewardsPage() {
         rewardsCardMissCount = 0;
         let waitingNow = getVal(BingAssistant.KEYS.waitingUserTask, null);
         if (!waitingNow || !waitingNow.url) {
-            try { waitingNow = JSON.parse(sessionStorage.getItem("Rebang_LastTask") || "null"); } catch (error) { waitingNow = null; }
+            try { waitingNow = JSON.parse(sessionStorage.getItem("Rebang_LastTask") || "null"); } catch (_error) { waitingNow = null; }
             if (waitingNow && waitingNow.url) {
                 setVal(BingAssistant.KEYS.waitingUserTask, {
                     name: waitingNow.name || "测验",
@@ -2021,7 +2028,7 @@ async function handleRewardsPage() {
     try {
         $link.attr("target", "_blank");
         $link[0].click();
-    } catch (error) {
+    } catch (_error) {
         window.open(target.url, "_blank");
     }
 }
@@ -2048,7 +2055,6 @@ async function doAutoSearch() {
   }
   // 每次执行搜索前，先同步状态。如果不是当前负责的搜索页，就不要动手。
   let isMaster = syncTabStatus();
-  let lastGlobalRun = Number(getVal(globalLockKey, 0));
   let nowTime = Date.now();
   const relayRetryKey = `${prefix}RelayRetryCount`; // 换页重试计数
 
@@ -2255,7 +2261,6 @@ async function doAutoSearch() {
     const startedIndex = currentKeywordIndex;
     try {
       const ok = await performSearch(word);
-      if (ok) setVal(BingAssistant.KEYS.searchSubmitted, word);
       if (!ok && isRunPaused()) {
         localStorage.setItem(currentKeywordIndexKey, String(startedIndex - 1));
       }
@@ -2414,6 +2419,7 @@ function makeDraggable(elementId, handleId) {
 }
 
 // 定时检查是否需要自动开始 (优化版：包含跨天自动刷新)
+let lastAutoStartCheckAt = 0;
 function checkAutoStart() {
     let currentDate = getLocalDateStr();
     let lastCheckDate = GM_getValue("Rebang_LastCheckDate", currentDate);
@@ -2432,36 +2438,10 @@ function checkAutoStart() {
     }
 
     checkAndRandomizeDailyChannel();
-
-    let startHourStr = getVal(autoStartHourKey, "-1");
-    let startMinStr = getVal(autoStartMinKey, "-1");
-    let startHour = parseInt(startHourStr, 10);
-    let startMin = parseInt(startMinStr, 10);
-    if (isNaN(startHour) || isNaN(startMin) || startHour === -1 || startMin === -1) return;
-    if (!BingAssistant.isScheduledDay(new Date(), getVal(BingAssistant.KEYS.repeatRule, BingAssistant.REPEAT.DAILY))) return;
-
-    if (BingAssistant.shouldSkipAutoStart(rebangExtensionStore)) return;
-    let triggeredKey = getAutoStartTriggeredKey();
-    if (getVal(triggeredKey, "false") === "true") return;
-
-    let now = new Date();
-    let isTimeReached = false;
-    if (now.getHours() > startHour) {
-        isTimeReached = true;
-    } else if (now.getHours() === startHour && now.getMinutes() >= startMin) {
-        isTimeReached = true;
-    }
-
-    if (isTimeReached) {
-        let limit = todaySearchLimit();
-        let current = Number(getVal(getAutoSearchCountKey(), 0));
-        if (getVal(autoSearchLockKey, "off") !== "on" && current < limit) {
-             setVal(triggeredKey, "true");
-             $("#ext-autosearch-lock").click();
-        } else if (current >= limit) {
-             setVal(triggeredKey, "true");
-        }
-    }
+    // The service worker owns all schedule/catch-up decisions, including opt-outs.
+    if (Date.now() - lastAutoStartCheckAt < 60000) return;
+    lastAutoStartCheckAt = Date.now();
+    void BingAssistant.sendMessage("CHECK_AUTO_START");
 }
 
 function initRewardsControls() {
@@ -2538,7 +2518,7 @@ function initSearchControls() {
   if (window.top !== window.self) return;
   $("#rebang").remove(); $("#rebang-widget").remove();
 
-  if ($("#rebang-widget").length == 0) {
+  if ($("#rebang-widget").length === 0) {
     const savedLimit = todaySearchLimit();
     const widgetHtml = `
     <div id="rebang-widget">
@@ -2580,7 +2560,7 @@ function initSearchControls() {
     renderRecentLogs();
   }
 
-  if (getVal(autoSearchLockKey, "off") == "off") {
+  if (getVal(autoSearchLockKey, "off") === "off") {
       setVal(jumpFailCountKey, 0);
       setVal(rewardsFailCountKey, 0);
   }
@@ -2613,7 +2593,7 @@ function initSearchControls() {
       showUserMessage(`已拉黑「${word}」，今天不再搜`);
   });
   $("#ext-autosearch-lock").off("click.rebang").on("click.rebang", function () {
-    if (getVal(autoSearchLockKey, "off") == "on") {
+    if (getVal(autoSearchLockKey, "off") === "on") {
       if (isRunPaused()) {
         chrome.runtime.sendMessage({ type: "RESUME_TODAY" }).catch(() => {});
         showUserMessage("继续今天的任务");
@@ -2651,7 +2631,7 @@ function initSearchControls() {
 
     // 1. 如果是 Rewards 页面
     if (BingAssistant.isRewardsPage(location)) {
-        if ($("#rebang-widget").length == 0) initRewardsControls();
+        if ($("#rebang-widget").length === 0) initRewardsControls();
         handleRewardsPage();
         setInterval(handleRewardsPage, 3000);
     }
@@ -2660,7 +2640,7 @@ function initSearchControls() {
         if (window.top === window.self) {
           intervalId = intervalId || setInterval(function () {
               // 初始化悬浮窗
-              if ($("#rebang-widget").length == 0) { initSearchControls(); }
+              if ($("#rebang-widget").length === 0) { initSearchControls(); }
 
               // --- 周期性同步状态 (要求4) ---
               syncTabStatus();
@@ -2670,7 +2650,7 @@ function initSearchControls() {
 
               // 如果开关开启，执行搜索循环
               publishAssistantState();
-              if (getVal(autoSearchLockKey, "off") == "on") {
+              if (getVal(autoSearchLockKey, "off") === "on") {
                  doAutoSearch();
               }
             }, 1000); // 1秒心跳
