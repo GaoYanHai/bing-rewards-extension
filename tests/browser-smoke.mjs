@@ -21,10 +21,14 @@ async function waitForStore(worker, predicate, timeout = 40000) {
 const errors = [];
 let context;
 let searchRequests = 0;
+let extensionOrigin = "";
 try {
   context = await chromium.launchPersistentContext(profile, {
     ...(process.env.EDGE_EXECUTABLE ? { executablePath: process.env.EDGE_EXECUTABLE } : { channel: "chromium" }),
     headless: true,
+    serviceWorkers: "block",
+    // Unhandled requests must fail locally rather than reach any external website.
+    proxy: { server: "http://127.0.0.1:9" },
     args: [`--disable-extensions-except=${root}`, `--load-extension=${root}`, "--no-first-run"]
   });
   // Only fixture HTML reaches content scripts. No Bing account or live searches are used.
@@ -41,9 +45,12 @@ try {
       await route.abort();
     }
   });
-  context.on("page", page => page.on("pageerror", error => errors.push(error.message)));
+  context.on("page", page => page.on("pageerror", error => {
+    if (page.url().startsWith(extensionOrigin) || String(error.stack).includes(extensionOrigin)) errors.push(error.message);
+  }));
   const worker = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker", { timeout: 15000 });
   const id = new URL(worker.url()).hostname;
+  extensionOrigin = `chrome-extension://${id}/`;
   const popup = await context.newPage();
   await popup.goto(`chrome-extension://${id}/popup.html`);
   await popup.locator("#view-risk").waitFor({ state: "visible" });
@@ -87,6 +94,13 @@ try {
   const store = await worker.evaluate(() => chrome.storage.local.get(null));
   assert.equal(store.Rebang_DangerEnabled, false);
 
+  // Attach Playwright before navigation. Chromium may load the first document of a
+  // chrome.tabs.create() tab before routing attaches; reusing a controlled tab avoids that race.
+  const searchPage = await context.newPage();
+  await searchPage.goto("https://www.bing.com/search?q=fixture");
+  assert.equal(await searchPage.title(), "Search fixture");
+  await searchPage.locator("#rebang-widget").waitFor({ state: "visible" });
+  await waitForStore(worker, s => s.Rebang_PointsBalance === 100);
   await popup.bringToFront();
   await popup.locator("#primary-btn").click();
   await waitForStore(worker, s => s.Rebang_AutoSearchLock === "on");
