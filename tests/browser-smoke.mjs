@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -149,26 +149,6 @@ try {
   assert.deepEqual(await untranslated(options), [], "dynamic settings and logs should be English");
   assert.deepEqual(await untranslated(popup), [], "dynamic popup should be English");
   assert.deepEqual(await untranslated(searchPage, "#rebang-widget"), [], "completed widget should be English");
-  // Store assets are actual screenshots from an isolated fixture, with no personal data.
-  if (process.env.STORE_SCREENSHOTS) {
-    const out = path.join(root, "store", "screenshots", "en");
-    await mkdir(out, { recursive: true });
-    await options.locator("#search-limit").fill("30");
-    await options.locator("#search-limit").blur();
-    await waitForStore(worker, s => s.Rebang_LimitSearchCount === 30);
-    await options.bringToFront();
-    await options.goto(`chrome-extension://${id}/options.html`);
-    await options.waitForFunction(() => document.documentElement.lang === "en" && document.querySelector("#search-limit").value === "30");
-    await options.waitForFunction(() => window.scrollY === 0);
-    await options.screenshot({ path: path.join(out, "01-settings.png") });
-    await options.locator('.page-nav a[href="#keyword-settings"]').click();
-    await options.waitForFunction(() => {
-      const top = document.querySelector("#keyword-settings").getBoundingClientRect().top;
-      const offset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--nav-offset"));
-      return Math.abs(top - offset) < 2;
-    });
-    await options.screenshot({ path: path.join(out, "02-keywords.png") });
-  }
   assert.deepEqual(errors, [], "extension pages should not raise uncaught errors");
   console.log("Browser smoke passed: English/Chinese switching, localized dynamic UI, onboarding, settings, schedule memory, danger confirmation, search navigation, pause/resume and completion.");
 } finally {

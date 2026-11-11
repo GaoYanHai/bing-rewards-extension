@@ -7,8 +7,6 @@
     "lint": "eslint i18n.js background.js content.js shared.js popup.js options.js --max-warnings=0",
     "test": "vitest run",
     "test:watch": "vitest",
-    "pack": "python store/pack.py",
-    "test:publish": "python -m unittest discover -s tests -p \"test_*.py\"",
     "test:browser": "node tests/browser-smoke.mjs"
   },
   "devDependencies": {

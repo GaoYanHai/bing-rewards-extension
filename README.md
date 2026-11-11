@@ -4,7 +4,7 @@
 
 [English documentation](README.en.md) · 中文界面与英语界面均可使用。在“设置 → 基础设置 → 界面语言”选择跟随浏览器、简体中文或 English；浏览器中文环境默认中文，其他环境默认英语。搜索词不会随界面语言被翻译。
 
-[Edge 商店安装](https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj) · [更新日志](CHANGELOG.md) · [隐私说明](PRIVACY.md) · [发布与故障恢复](store/README.md)
+[Edge 商店安装](https://microsoftedge.microsoft.com/addons/detail/bblfidpemgicndppkjeihkldadnllgjj) · [更新日志](CHANGELOG.md) · [隐私说明](PRIVACY.md)
 
 ## 安装与使用
 
@@ -46,21 +46,17 @@
 | 昨天的失败、小结和积分出现在今天；空积分被转成零 | 小结按日期过滤，缺失积分保持未知 |
 | 后台异常不回复、保存失败仍显示成功 | 返回明确失败结果，设置页显示保存错误 |
 | 月度积分图只有今天加分才显示 | 有历史加分就显示 |
-| 发布超时重跑会再上传，没有并发或版本保护 | 保存操作 ID/摘要、续查原操作、文件锁、阻止同版本不同包 |
-| 开发和发布文件被本机忽略规则排除 | 纳入本仓库并加入 CI；密钥和发布状态继续只保存在本机 |
 
 详细记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 开发与验证
 
-要求 Node.js 24、Python 3.10+。PowerShell 7 用于 Windows 包装脚本；Python 打包/发布入口也可单独运行。
+要求 Node.js 24。
 
 ```sh
 npm ci
 npm run lint
 npm test
-npm run test:publish
-npm run pack
 ```
 
 真实浏览器回归使用独立临时配置和本地拦截的 Bing 页面，不使用个人账号，也不向真实 Bing 发起搜索：
@@ -77,31 +73,9 @@ $env:EDGE_EXECUTABLE = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge
 npm run test:browser
 ```
 
-测试覆盖共享逻辑、开始/暂停/继续/停止、导航前保存、补做策略、发布的重复执行/超时/断网/审核冲突，以及实际加载扩展后的首次确认、设置、定时记忆、词库、搜索计分和完成。测试页面用于验证扩展行为，不能证明当前微软页面的所有布局和地区规则都兼容；账号真实积分和商店审核仍需现场确认。
+测试覆盖共享逻辑、开始/暂停/继续/停止、导航前保存、补做策略，以及实际加载扩展后的首次确认、设置、定时记忆、词库、搜索计分和完成。测试页面用于验证扩展行为，不能证明当前微软页面的所有布局和地区规则都兼容；账号真实积分和商店审核仍需现场确认。
 
-GitHub Actions 执行 lint、JavaScript/Python 测试、浏览器回归及打包。发布不由 push 自动触发。
-
-## 打包与 Edge 发布
-
-```powershell
-pwsh -File store/pack.ps1
-pwsh -File store/publish.ps1 -Status
-```
-
-打包仅生成当前 `manifest.json` 版本对应的一个 ZIP，相同源码生成相同 SHA-256。包中不包含开发依赖、测试、发布脚本、密钥或发布记录。
-
-首次提交新版本前，先在 Partner Center 确认无审核中的提交，再执行：
-
-```powershell
-pwsh -File store/publish.ps1 .\bing-rewards-extension-3.4.4.zip -ConfirmStoreReady -UploadOnly
-python store/prepare_listing.py --locale en-US
-# 在 Partner Center 更新英语介绍、截图及标志，保存后复用已上传草稿提交：
-pwsh -File store/publish.ps1 .\bing-rewards-extension-3.4.4.zip
-```
-
-超时后重跑同一个命令会续查已保存的操作，不会重新上传。不要删掉 `.edge-publish-state/` 来尝试解除排队。已有审核冲突或未知结果的恢复方式见 [发布说明](store/README.md)。
-
-同一个 ZIP 内包含 `_locales/en` 和 `_locales/zh_CN`，不要为英文商店页再上传另一个安装包。商店长介绍和截图必须通过 Partner Center 编辑，公开更新 API 不支持修改这些字段。英文素材源文件位于 [store/listings/en-US.json](store/listings/en-US.json)，实际界面截图位于 `store/screenshots/en/`。脚本会校验两种语言的包元数据，默认使用独立维护的英文审核说明。
+GitHub Actions 执行 lint、JavaScript 测试和浏览器回归。
 
 ## 权限与隐私
 
@@ -112,7 +86,7 @@ pwsh -File store/publish.ps1 .\bing-rewards-extension-3.4.4.zip
 - `declarativeNetRequestWithHostAccess`：仅在启用移动搜索时修改指定标签页的请求头。
 - `https://*.bing.com/*`：在搜索和 Rewards 页面读取进度并执行用户启用的操作。
 
-扩展设置和记录保存在本机，不上传到项目服务器。搜索会按正常浏览器行为发送给 Bing；发布凭据仅供本机维护脚本使用。详见 [PRIVACY.md](PRIVACY.md)。
+扩展设置和记录保存在本机，不上传到项目服务器。搜索会按正常浏览器行为发送给 Bing。详见 [PRIVACY.md](PRIVACY.md)。
 
 ## 项目结构
 
@@ -121,8 +95,7 @@ background.js        后台、定时、消息、移动搜索会话
 content.js           Bing/Rewards 页面交互
 shared.js            设置、状态、词库及共享逻辑
 popup.* / options.*  工具栏界面和设置页
-store/               确定性打包、发布与恢复说明
-tests/               单元、流程、发布和浏览器测试
+tests/               单元、流程和浏览器测试
 .github/workflows/   自动检查
 ```
 
